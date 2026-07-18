@@ -1,0 +1,47 @@
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python Cache & Compiled Files
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Configuration & Secrets
+.env
+app_startup.log
+app_startup.log.*
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS Files
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local Application Data & Personal Memory (GitIgnore)
+data/app_cache.json
+data/memory/
+
+# Biometric & Face Recognition Data (GitIgnore)
+gesture/faces.pt
+
+# Large AI Model Cache Policies
+# Ignore Ollama model blobs and manifests
+models/blobs/
+models/manifests/
+
+# Ensure core light model files and Kokoro TTS models are tracked
+!models/helio.onnx
+!models/helio.tflite
+!models/tts/

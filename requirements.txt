@@ -1,0 +1,26 @@
+# Core PyQt GUI & Media Processing
+PyQt5>=5.15.2
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.22.0,<2.0.0
+
+# Deep Learning Frameworks
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Wake Word & Speech-to-Text
+openwakeword>=0.6.0
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+soundfile>=0.12.0
+silero-vad>=6.0.0
+
+# Text-to-Speech (TTS)
+kokoro>=0.7.16
+espeakng-loader>=0.2.4
+
+# Face ID / Face Detection fallback
+facenet-pytorch>=2.5.0
+
+# General Utilities
+requests>=2.31.0
