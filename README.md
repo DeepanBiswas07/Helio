@@ -12,7 +12,7 @@
 
 <br>
 
-<img src="docs/media/hero.gif" alt="Helio's desktop orb opening into its holographic solar system" width="100%">
+<img src="docs/media/hero.webp" alt="Helio's desktop orb opening into its holographic solar system" width="100%">
 
 <br>
 
@@ -61,7 +61,7 @@ Hand tracking through your webcam: a peace sign opens a command window, an open 
 
 ## ⚒️ The Forge & the Workshop
 
-<img src="docs/media/build.gif" alt="Helio building a multi-file website live in the workshop, code on the left and the page on the right" width="100%">
+<img src="docs/media/build.webp" alt="Helio building a multi-file website live in the workshop, code on the left and the page on the right" width="100%">
 
 <sub>Recorded live: *"build me a website for Nova, a smart home app…"* — Helio writes a multi-file project, streaming the source on the left while the page takes shape on the right. Sped up while it writes.</sub>
 
@@ -78,7 +78,7 @@ The Forge is where Helio makes things, and the **Workshop** is its full-screen b
 
 ## 🖥️ Planets that are real tools
 
-<img src="docs/media/system.gif" alt="Helio's System planet showing live CPU, RAM, disk and network stats" width="100%">
+<img src="docs/media/system.webp" alt="Helio's System planet showing live CPU, RAM, disk and network stats" width="100%">
 
 | Planet | What it does |
 |---|---|
