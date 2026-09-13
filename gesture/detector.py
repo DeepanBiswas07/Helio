@@ -85,10 +85,14 @@ class HandFeatures:
     for a single frame.
     """
 
-    def __init__(self, lms, frame_w: int, frame_h: int):
+    def __init__(self, lms, frame_w: int, frame_h: int, handedness: str = "Right",
+                 timestamp: Optional[float] = None):
         self.lms = lms
         self.frame_w = frame_w
         self.frame_h = frame_h
+        self.handedness = handedness
+        # time.monotonic() at capture, for the overlay's smoothing filter.
+        self.timestamp = timestamp
 
         # ── Finger extended flags ──────────────────────────────────────────
         self.thumb_up   = _thumb_extended(lms)
@@ -118,6 +122,7 @@ class HandFeatures:
         ]
         cx = sum(p[0] for p in palm_pts) / len(palm_pts)
         cy = sum(p[1] for p in palm_pts) / len(palm_pts)
+        self.palm_centre_norm = (cx, cy)
         self.palm_centre_px = (int(cx * frame_w), int(cy * frame_h))
 
         # ── Pinch distance (thumb tip ↔ index tip, normalised) ──────────
@@ -143,7 +148,7 @@ class HandFeatures:
     def is_closed_fist(self) -> bool:
         """
         No fingers extended (ignoring thumb for robustness).
-        Must be tightly bunched (relative to knuckle width) to distinguish from a claw.
+        Must be tightly bunched (relative to knuckle width).
         """
         spread = _dist2d(
             _lm(self.lms, INDEX_TIP),
@@ -181,34 +186,6 @@ class HandFeatures:
             and self.pinch_distance > 0.10
         )
 
-    def is_claw(self) -> bool:
-        """
-        Claw: all 4 finger tips bent below their PIP joints,
-        AND fingertips still spread apart (not bunched like a fist).
-        The spread check distinguishes claw from closed fist.
-        """
-        def _bent(tip_idx, pip_idx):
-            tip = _lm(self.lms, tip_idx)
-            pip = _lm(self.lms, pip_idx)
-            return tip[1] > pip[1]  # tip below pip in image coords = curled
-
-        spread = _dist2d(
-            _lm(self.lms, INDEX_TIP),
-            _lm(self.lms, PINKY_TIP)
-        )
-        palm_width = _dist2d(
-            _lm(self.lms, INDEX_MCP),
-            _lm(self.lms, PINKY_MCP)
-        )
-        ratio = spread / max(0.01, palm_width)
-
-        return (
-            _bent(INDEX_TIP,  INDEX_PIP)
-            and _bent(MIDDLE_TIP, MIDDLE_PIP)
-            and _bent(RING_TIP,   RING_PIP)
-            and _bent(PINKY_TIP,  PINKY_PIP)
-            and ratio > 0.95
-        )
 
     def is_swipe_shape(self) -> bool:
         """

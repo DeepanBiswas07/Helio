@@ -24,6 +24,10 @@ WEB_BACKED_INTENTS = {"answer", "browser"}
 
 
 def clean_text(value):
+    # Defensive: an upstream LLM cleanup pass can emit a list-shaped value
+    # (e.g. "steps") even where a tool's declared schema expects a string.
+    if isinstance(value, list):
+        value = ", ".join(str(item).strip() for item in value if str(item).strip())
     if not isinstance(value, str):
         return ""
     return value.strip()
@@ -110,6 +114,11 @@ def validate_tool_action(action_data):
                 cleaned[key] = index
             continue
 
+        if value_type in ["object", "dict", "list"] or isinstance(value, (dict, list)):
+            if value is not None:
+                cleaned[key] = value
+            continue
+
         text = clean_text(value)
         if text:
             cleaned[key] = text
@@ -146,10 +155,26 @@ def tool_action_from_intent(intent, parameters, user_query):
     if intent == "tool":
         action_data = {"action": clean_text(parameters.get("action"))}
 
-        for key in ("query", "app", "path", "root", "mode", "target", "fact"):
+        # Include standard string/text keys
+        for key in (
+            "query", "app", "path", "root", "mode", "target", "fact",
+            "category", "name", "steps", "purpose", "title", "summary", "topics",
+            "when", "message", "which", "question",
+            "what", "kind", "duration", "repeats", "range", "choice", "skipped",
+            "context",
+            # Forge and maker keys:
+            "chart_type", "x_label", "y_label", "html_code", "css_code", "js_code",
+            "content", "file_type",
+        ):
             text = clean_text(parameters.get(key))
             if text:
                 action_data[key] = text
+
+        # Preserve structured object/list parameters (e.g. data for forge_create_chart)
+        for key in ("data", "options", "items", "metadata"):
+            val = parameters.get(key)
+            if isinstance(val, (dict, list)):
+                action_data[key] = val
 
         if not action_data.get("query") and user_query:
             action_data["query"] = clean_text(user_query)

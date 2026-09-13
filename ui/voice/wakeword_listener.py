@@ -1,252 +1,201 @@
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
-import sounddevice as sd
+"""
+wakeword_listener.py — the microphone: which one, and what it hears.
+
+The PortAudio callback only copies each chunk onto a queue. Gain, the wake
+word model, Silero and the onset check all run on a worker thread (see
+wake_engine.py). They used to run inside the callback, so any stall on Helio's
+busy UI thread overran the audio buffer — "Audio Stream Status: input
+overflow" — and the audio that got dropped was often the wake word itself.
+"""
+import os
+import queue
+import threading
+import time
+
 import numpy as np
+import sounddevice as sd
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 from openwakeword.model import Model
+
+from voice import audio_devices
 from voice.vad import SileroVAD
+from voice.wake_engine import CHUNK, SAMPLE_RATE, WakeEngine
 
 
 class WakeWordListener(QObject):
-    # Signal emitted when wakeword is detected (wakeword_name, score)
+    # (wakeword_name, score)
     detected = pyqtSignal(str, float)
-    # Signal emitted to transmit real-time audio volume levels (0.0 to 1.0)
+    # real-time audio level while listening, 0.0 to 1.0
     volume_updated = pyqtSignal(float)
-    # Signal emitted to transmit raw mono audio chunks for speech-to-text recording
-    audio_recorded = pyqtSignal(np.ndarray)
-    # Signal emitted by Silero VAD when end of speech is detected
+    # (int16 mono chunk, absolute sample index of its first sample)
+    audio_recorded = pyqtSignal(object, int)
+    # Silero: the speaker stopped (or never started)
     vad_speech_ended = pyqtSignal()
+    # a plain-English explanation when the microphone hears nothing
+    mic_problem = pyqtSignal(str)
+    _switch_device = pyqtSignal(int)
+
+    SAMPLE_RATE = SAMPLE_RATE
+    CHUNK_SIZE = CHUNK
+    DEAD_AFTER_S = 15.0
+    REPROBE_EVERY_S = 30.0
 
     def __init__(self, model_path, device_index=None, parent=None):
         super().__init__(parent)
-        
-        # Load your custom model
-        self.model = Model(
-            wakeword_models=[model_path],
-            inference_framework="onnx"
-        )
 
-        self.SAMPLE_RATE = 16000
-        self.CHUNK_SIZE = 1280
-        self.THRESHOLD = 0.6  # Lowered to 0.6 to make triggering more responsive and easy
+        self.model = Model(wakeword_models=[model_path], inference_framework="onnx")
+        self.vad = SileroVAD()
+        self.vad.load()
+        speech_prob, check_name = self._onset_check()
+        self.engine = WakeEngine(self.model, self.vad,
+                                 speech_prob=speech_prob, check_name=check_name)
+
+        # Where the recording for the latest wake should start. Read (and
+        # cleared) by the window when it switches to listening.
+        self.wake_start_sample = None
+
         self.stream = None
-        self._prev_state = None  # Tracks state transitions
-        self.max_rms = 500.0  # Dynamic auto-gain control baseline peak RMS
-        
-        # Debounce and cooldown to prevent sliding-window double triggers
-        self.last_detection_time = 0.0
-        self.cooldown_period = 4.0  # Ignore subsequent detections for 4 seconds
-        
-        # Keep track of active audio hardware fingerprint for dynamic hot-swapping
-        self.current_devices_fingerprint = self._get_devices_fingerprint()
-        
-        # User defined device index or intelligent name-based ranking
-        self.audio_gain = 1.0
-        self.device_index = device_index
-        if self.device_index is None:
-            self.device_index = self._select_best_microphone()
+        self._queue = queue.Queue(maxsize=400)          # ~32 s of audio
+        self._worker = None
+        self._running = False
+        self._quiet_chunks = 0
+        self._dead_warned = False
+        self._probing = False
+        self._last_probe = 0.0
+        self._pending_warning = None
+        self._overflows = 0
+        self._dropped = 0
+        self._last_score_print = 0.0
 
-        # Dynamic hardware monitoring timer (checks for new/removed devices every 3 seconds)
+        self.current_devices_fingerprint = audio_devices.fingerprint()
+        self._explicit_device = device_index is not None
+        self.device_index = device_index if self._explicit_device else self._choose()
+
+        self._switch_device.connect(self._on_switch_device)
+
+        # Plugging in / removing a device.
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._check_for_hardware_changes)
         self.poll_timer.start(3000)
 
-        # Silero VAD — loaded once at startup for instant end-of-speech detection
-        self.vad = SileroVAD()
-        self.vad.load()
+        # A device that goes silent mid-session.
+        self.health_timer = QTimer(self)
+        self.health_timer.timeout.connect(self._check_health)
+        self.health_timer.start(5000)
 
-    def _get_devices_fingerprint(self):
-        """Creates a unique fingerprint of the current audio devices to detect plug/unplug events."""
-        try:
-            devices = sd.query_devices()
-            return tuple((d['name'], d['max_input_channels']) for d in devices)
-        except Exception:
-            return ()
+    # ── setup ────────────────────────────────────────────────────────────────
 
-    def _select_best_microphone(self):
-        """
-        Intelligently ranks available recording devices, prioritizing headsets/earbuds (like Zenith)
-        over built-in microphone arrays, and falling back to the OS default input device.
-        """
+    @staticmethod
+    def _onset_check():
+        """Silero + Whisper for the one-breath 'Hey Helio, do X' form."""
+        if os.environ.get("HELIO_WAKE_WHISPER", "1").strip().lower() in ("0", "false", "off", "no"):
+            print("WakeWordListener: speech-onset wake check is off (HELIO_WAKE_WHISPER=0).")
+            return None, None
         try:
-            devices = sd.query_devices()
+            import torch
+            from silero_vad import load_silero_vad
+            from voice.stt import check_name
+
+            onset_model = load_silero_vad()
+
+            def speech_prob(window):
+                with torch.no_grad():
+                    return float(onset_model(torch.from_numpy(window), SAMPLE_RATE).item())
+
+            return speech_prob, check_name
         except Exception as e:
-            print(f"WakeWordListener: Error querying audio devices: {e}")
-            self.audio_gain = 1.0
-            return sd.default.device[0]
+            print(f"WakeWordListener: speech-onset wake check unavailable ({e}).")
+            return None, None
 
-        inputs = []
-        for idx, dev in enumerate(devices):
-            if dev['max_input_channels'] > 0:
-                inputs.append((idx, dev['name'], dev['name'].lower()))
+    def _choose(self):
+        choice = audio_devices.choose_microphone()
+        if not choice.live and choice.warning:
+            print(choice.warning)
+            self._pending_warning = choice.warning
+        return choice.index
 
-        if not inputs:
-            self.audio_gain = 1.0
-            return sd.default.device[0]
+    # ── audio ────────────────────────────────────────────────────────────────
 
-        best_idx = None
-        best_rank = -1
-
-        for idx, orig_name, name in inputs:
-            if "mapper" in name or "primary" in name or "stereo mix" in name or "driver" in name:
-                rank = 0
-            elif any(k in name for k in ["headset", "headphone", "hands-free", "handsfree", "wireless", "bluetooth", "zenith"]):
-                rank = 3
-            elif any(k in name for k in ["microphone", "mic", "array", "realtek", "intel", "smart sound"]):
-                rank = 2
-            else:
-                rank = 1
-
-            if rank > best_rank:
-                best_rank = rank
-                best_idx = idx
-            elif rank == best_rank:
-                # If same rank, prefer the OS default input device
-                if idx == sd.default.device[0]:
-                    best_idx = idx
-
-        if best_idx is None:
-            best_idx = sd.default.device[0]
-
-        # Set audio gain based on the rank of the chosen device
-        # Bluetooth/headsets (rank 3) get a substantial digital boost (e.g., 8.0x)
-        # Built-in arrays (rank 2) get a mild boost (e.g., 1.5x)
-        # Defaults (rank <= 1) get 1.0x
+    def _on_audio(self, indata, frames, time_info, status):
+        # Real-time thread: copy and go. Anything slower loses audio.
+        if status and status.input_overflow:
+            self._overflows += 1
         try:
-            chosen_name = devices[best_idx]['name'].lower()
-            if any(k in chosen_name for k in ["headset", "headphone", "hands-free", "handsfree", "wireless", "bluetooth", "zenith"]):
-                self.audio_gain = 8.0
-            elif any(k in chosen_name for k in ["microphone", "mic", "array", "realtek", "intel", "smart sound"]):
-                self.audio_gain = 1.5
-            else:
-                self.audio_gain = 1.0
-        except Exception:
-            self.audio_gain = 1.0
+            self._queue.put_nowait(indata[:, 0].copy())
+        except queue.Full:
+            self._dropped += 1
 
-        try:
-            dev_name = devices[best_idx]['name']
-        except Exception:
-            dev_name = "Unknown"
-
-        print(f"WakeWordListener: Intelligently selected microphone: Device #{best_idx} ({dev_name}) with digital gain boost={self.audio_gain}x")
-        return best_idx
-
-    def _check_for_hardware_changes(self):
-        """Checks if microphone devices have changed (e.g. plugging/unplugging headphones)."""
-        new_fingerprint = self._get_devices_fingerprint()
-        if new_fingerprint != self.current_devices_fingerprint:
-            print("\nWakeWordListener: Audio hardware change detected! Re-routing microphone...")
-            self.current_devices_fingerprint = new_fingerprint
-            if self.stream:
-                self.stop()
-            try:
-                sd._terminate()
-                sd._initialize()
-            except Exception:
-                pass
-            self.device_index = self._select_best_microphone()
-            self.start()
-
-    def process_audio(self, indata, frames, time_info, status):
-        # Import the state singleton to read the active UI stage
+    def _work(self):
         from orb.state import state as orb_state
-        
-        # Convert multi-channel input to mono by averaging all channels.
-        # This prevents channel-locking on unused or noisy channels.
-        if indata.ndim > 1 and indata.shape[1] > 1:
-            mono_indata = np.mean(indata, axis=1, keepdims=True)
-        else:
-            mono_indata = indata.copy()
-            
-        # Apply digital gain boost if needed
-        if self.audio_gain != 1.0:
-            mono_indata = mono_indata.astype(np.float32) * self.audio_gain
-            mono_indata = np.clip(mono_indata, -32768, 32767).astype(np.int16)
-        else:
-            mono_indata = mono_indata.astype(np.int16)
-        
-        # Always feed raw (boosted) data to the manager so the SpeechRecorder's 1.6s pre-roll is constantly populated
-        self.audio_recorded.emit(mono_indata)
 
-        # ─── Self-Cleaning State Transition Handler ───
-        if orb_state.name != self._prev_state:
-            resets = []
-            # We ONLY reset the wake word model when we stop active listening (to clear speech data)
-            if self._prev_state == "listening":
-                self.model.reset()
-                resets.append("model")
-            # We ONLY reset the VAD when we start active listening (to start with a clean VAD state)
-            if orb_state.name == "listening":
-                self.vad.reset()
-                resets.append("VAD")
-            
-            reset_str = " & ".join(resets) if resets else "none"
-            print(f"[State Transition] WakeWordListener: State changed ({self._prev_state} -> {orb_state.name}), reset: {reset_str}.")
-            self._prev_state = orb_state.name
-        
-        # ─── Case 1: Active Listening ───────────
-        if orb_state.name == "listening":
-            audio_data = mono_indata.flatten().astype(np.float64)
-            rms = np.sqrt(np.mean(audio_data**2)) if len(audio_data) > 0 else 0.0
- 
-            self.max_rms = max(self.max_rms * 0.995, rms)
-            normalized_vol = min(1.0, rms / max(150.0, self.max_rms))
-            self.volume_updated.emit(normalized_vol)
- 
-            # Feed chunk to Silero VAD — fires vad_speech_ended when silence follows speech
-            audio_int16 = mono_indata.flatten().astype(np.int16)
-            if self.vad.process_chunk(audio_int16):
-                print("[VAD] End of speech detected.")
-                self.vad_speech_ended.emit()
-            
-            return
- 
-        # ─── Case 2: Wake Word Recognition (Idle, Hover, Speaking, Thinking) ───
-        # Note: No VAD checks during thinking anymore! We ONLY wake up by Wake Word ("Hey Helio").
-        if status:
-            print(f"Audio Stream Status: {status}")
- 
-        audio = mono_indata.flatten().astype(np.int16)
-        prediction = self.model.predict(audio)
- 
-        import time
-        current_time = time.time()
- 
-        for wakeword, score in prediction.items():
-            if score > 0.01:
-                print(f"{wakeword} score: {score:.3f}")
- 
-            if score > self.THRESHOLD:
-                if current_time - self.last_detection_time > self.cooldown_period:
-                    self.last_detection_time = current_time
-                    try:
-                        print(f"\n[*] WAKEWORD DETECTED: {wakeword} ({score:.3f}) [*]\n")
-                    except Exception:
-                        pass
-                    self.detected.emit(wakeword, score)
+        while self._running:
+            try:
+                raw = self._queue.get(timeout=0.25)
+            except queue.Empty:
+                continue
+
+            peak = int(np.max(np.abs(raw.astype(np.int32)))) if raw.size else 0
+            self._quiet_chunks = self._quiet_chunks + 1 if peak <= audio_devices.DEAD_PEAK else 0
+
+            try:
+                events = self.engine.feed(raw, orb_state.name)
+            except Exception as e:
+                print(f"WakeWordListener: audio processing error: {e}")
+                continue
+            for event in events:
+                self._dispatch(event)
+
+            score = self.engine.last_score
+            if 0.25 <= score < self.engine.threshold and time.time() - self._last_score_print > 1.0:
+                self._last_score_print = time.time()
+                print(f"helio score: {score:.3f} (below {self.engine.threshold})")
+
+    def _dispatch(self, event):
+        kind = event[0]
+        if kind == "audio":
+            self.audio_recorded.emit(event[2], event[1])
+        elif kind == "volume":
+            self.volume_updated.emit(event[1])
+        elif kind == "speech_ended":
+            print("[VAD] End of speech detected.")
+            self.vad_speech_ended.emit()
+        elif kind == "state":
+            print(f"[State Transition] WakeWordListener: {event[1]} -> {event[2]}")
+        elif kind == "wake":
+            _, source, score, start = event
+            self.wake_start_sample = start
+            print(f"\n[*] WAKEWORD DETECTED: {source} ({score:.2f}) [*]\n")
+            self.detected.emit(source, score)
+
+    # ── start / stop ─────────────────────────────────────────────────────────
 
     def start(self):
-        try:
-            # Always request mono (1 channel). PortAudio/Windows drivers will handle
-            # the conversion and automatic hardware beamforming/noise cancellation.
-            channels = 1
+        if self._worker is None or not self._worker.is_alive():
+            self._running = True
+            self._worker = threading.Thread(target=self._work, name="helio-audio", daemon=True)
+            self._worker.start()
 
-            self.stream = sd.InputStream(
-                device=self.device_index,
-                samplerate=self.SAMPLE_RATE,
-                channels=channels,
-                dtype='int16',
-                blocksize=self.CHUNK_SIZE,
-                callback=self.process_audio
-            )
+        try:
+            # latency="high" gives PortAudio a bigger buffer to ride out stalls.
+            self.stream = sd.InputStream(device=self.device_index, samplerate=SAMPLE_RATE,
+                                         channels=1, dtype="int16", blocksize=CHUNK,
+                                         latency="high", callback=self._on_audio)
             self.stream.start()
-            print(f"Wakeword listener stream started successfully using Device #{self.device_index} with channels={channels}.\n")
+            print(f"Wakeword listener stream started on Device #{self.device_index} "
+                  f"({audio_devices.device_name(self.device_index)}).\n")
         except Exception as e:
             print(f"Error starting audio stream on Device #{self.device_index}: {e}")
             if self.device_index is not None:
-                print("WakeWordListener: Attempting safety fallback to system default input device...")
+                print("WakeWordListener: falling back to the system default input device...")
                 self.device_index = None
                 self.start()
+                return
 
-    def stop(self):
+        if self._pending_warning:
+            self.mic_problem.emit(self._pending_warning)
+            self._pending_warning = None
+
+    def _stop_stream(self):
         if self.stream:
             try:
                 self.stream.stop()
@@ -255,3 +204,69 @@ class WakeWordListener(QObject):
                 print(f"Error stopping stream: {e}")
             self.stream = None
             print("Wakeword listener stream stopped.")
+
+    def stop(self):
+        self._stop_stream()
+        self._running = False
+        if self._worker is not None:
+            self._worker.join(timeout=1.0)
+            self._worker = None
+
+    # ── devices ──────────────────────────────────────────────────────────────
+
+    def _check_for_hardware_changes(self):
+        new_fingerprint = audio_devices.fingerprint()
+        if new_fingerprint == self.current_devices_fingerprint:
+            return
+        print("\nWakeWordListener: Audio hardware change detected! Re-routing microphone...")
+        self.current_devices_fingerprint = new_fingerprint
+        self._stop_stream()
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+        if not self._explicit_device:
+            self.device_index = self._choose()
+        self._quiet_chunks = 0
+        self._dead_warned = False
+        self.start()
+
+    def _check_health(self):
+        if self.stream is None:
+            return
+        quiet_s = self._quiet_chunks * CHUNK / SAMPLE_RATE
+        if quiet_s < 1.0:
+            self._dead_warned = False
+        if quiet_s < self.DEAD_AFTER_S:
+            return
+
+        if not self._dead_warned:
+            self._dead_warned = True
+            message = audio_devices.silence_warning(self.device_index)
+            print(message)
+            self.mic_problem.emit(message)
+
+        if (self._probing or self._explicit_device
+                or time.time() - self._last_probe < self.REPROBE_EVERY_S):
+            return
+        self._probing = True
+        self._last_probe = time.time()
+        threading.Thread(target=self._reprobe, name="helio-mic-probe", daemon=True).start()
+
+    def _reprobe(self):
+        try:
+            live = audio_devices.find_live_microphone(exclude=self.device_index)
+            if live is not None:
+                self._switch_device.emit(live)
+        finally:
+            self._probing = False
+
+    def _on_switch_device(self, index):
+        print(f"WakeWordListener: #{self.device_index} is silent; switching to live microphone "
+              f"#{index} ({audio_devices.device_name(index)}).")
+        self._stop_stream()
+        self.device_index = index
+        self._quiet_chunks = 0
+        self._dead_warned = False
+        self.start()

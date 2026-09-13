@@ -4,8 +4,22 @@ from core.llm import generate
 
 NORMALIZABLE_KEYS = ("query", "target", "mode", "path", "root", "app")
 
+# Every other parameter name any tool actually declares (see tools/*/*.py @tool
+# decorators). Keep in sync with routing/intent_detector.py::PARAMETER_KEYS.
+# Anything outside this set is dropped rather than passed through unchecked —
+# an LLM cleanup pass that over-generates should not be able to inject arbitrary
+# keys (e.g. an echoed-back "parameters"/"intent"/"confidence") into a tool call.
+EXTRA_ALLOWED_KEYS = (
+    "fact", "category", "name", "steps", "purpose", "title", "summary", "topics",
+    "when", "message", "which", "question",
+    "what", "kind", "duration", "repeats", "range", "choice", "skipped", "context",
+)
+
 
 def clean_text(value):
+    if isinstance(value, list):
+        value = ", ".join(str(item).strip() for item in value if str(item).strip())
+
     if not isinstance(value, str):
         return ""
 
@@ -33,13 +47,11 @@ def normalize_parameters_basic(parameters):
                 cleaned[key] = index
             continue
 
-        if key in NORMALIZABLE_KEYS or key == "action":
+        if key in NORMALIZABLE_KEYS or key in EXTRA_ALLOWED_KEYS or key == "action":
             text = clean_text(value)
             if text:
                 cleaned[key] = text
             continue
-
-        cleaned[key] = value
 
     return cleaned
 

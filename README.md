@@ -1,168 +1,314 @@
 <div align="center">
-  <br>
-  <h1>🌌 HELIO</h1>
-  <h3>The Next Evolution of Desktop Intelligence</h3>
-  <p><strong>100% Offline • Zero-Latency Multimodal AI • Holographic Gesture Interface</strong></p>
-  
-  [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg?style=for-the-badge)](https://www.python.org/downloads/)
-  [![PyQt5](https://img.shields.io/badge/UI-PyQt5-green.svg?style=for-the-badge)](https://riverbankcomputing.com/software/pyqt/)
-  [![Local AI](https://img.shields.io/badge/AI-100%25_Offline-critical.svg?style=for-the-badge)](#)
-  [![License](https://img.shields.io/badge/License-MIT-purple.svg?style=for-the-badge)](#)
 
-  <br>
-  <i>Any sufficiently advanced technology is indistinguishable from magic. Welcome to the future.</i>
-  <br><br>
-  <b>Designed and Built by <a href="https://github.com/DeepanBiswas07">Deepan</a></b>
-  <br><br>
+<h1>🌌 HELIO</h1>
+
+<h3>A holographic AI assistant that lives on your desktop.<br>Talk to it. Wave at it. Watch it build.</h3>
+
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![PyQt5](https://img.shields.io/badge/UI-PyQt5-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://riverbankcomputing.com/software/pyqt/)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-get-started)
+[![Ollama](https://img.shields.io/badge/LLM-Ollama-000000?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.com/)
+[![License](https://img.shields.io/badge/License-PolyForm_Noncommercial-8A2BE2?style=for-the-badge)](LICENSE.md)
+
+<br>
+
+<img src="docs/media/hero.gif" alt="Helio's desktop orb opening into its holographic solar system" width="100%">
+
+<br>
+
+**Voice, hand gestures and an autonomous agent — in one holographic interface.**<br>
+Say *"Hey Helio"*, and a floating orb opens into a living solar system of planets, each one a tool.<br>
+Ask it to build a website and you watch the code being written, live, beside the finished page.
+
 </div>
 
 ---
 
-## 🚀 Why Helio?
-
-Most AI assistants are just text boxes wrapped around a cloud API. **Helio is different.** 
-
-Helio transforms your Windows desktop into a futuristic, interactive command center. It lives natively on your screen as a **transparent, physics-driven holographic orb**. You don't type to Helio—you **speak** to it, and you **gesture** to it. 
-
-By combining GPU-accelerated speech recognition, real-time hand tracking, and local Ollama-powered cognitive reasoning, Helio achieves what was previously only seen in science fiction: a truly intelligent, zero-latency assistant that understands the world *around* your computer, all while keeping 100% of your data private and offline.
-
----
-
-## 🔥 Masterpiece Features
+## ✨ Highlights
 
 <table>
 <tr>
-<td width="50%">
-<h3>🔮 Holographic PyQt5 Interface</h3>
-Helio ditches the traditional window frame. It manifests as a breathtaking, floating transparent orb that reacts to your mouse with physics-driven scaling. When summoned, it expands into a full-screen, immersive <b>Holographic Space Portal</b> that overlays your desktop with dynamic data planets and widgets.
+<td width="50%" valign="top">
+
+### 🪐 A solar system, not a window
+Helio floats on your desktop as a glowing orb. Summon it and it unfolds into a full-screen **holographic solar system** — a burning sun, orbit rings, and eight planets that open into live panels: **Chat, Memory, Files, System, Schedule, Setup** and the **Forge**.
+
 </td>
-<td width="50%">
-<h3>🖐️ Real-Time Gesture Control</h3>
-Why touch your mouse? Powered by a highly optimized background <b>MediaPipe</b> thread, Helio watches your webcam. Raise both hands to physically "pull open" the portal. Swipe left to navigate planets. Form a fist to dismiss windows. It is the ultimate hands-free interface.
+<td width="50%" valign="top">
+
+### ⚒️ The Forge builds while you watch
+*"Build me a website for my bakery."* Code streams into one panel while the page renders in the other. Multi-file projects, real photos fetched for the page, charts, documents and scripts — then *"make the buttons bigger"* and it revises in place.
+
 </td>
 </tr>
 <tr>
-<td width="50%">
-<h3>🎙️ Zero-Latency Multimodal Voice</h3>
-Say <i>"Hey Helio"</i> from across the room. An advanced <b>openwakeword</b> engine with 8.0x digital gain wakes the system instantly. A dynamic <b>Silero VAD</b> automatically detects when you finish speaking, feeding your voice directly into GPU-accelerated <b>Distil-Whisper</b> for instantaneous transcription.
+<td width="50%" valign="top">
+
+### 🎙️ Voice that keeps up with you
+**"Hey Helio"** on its own, or **"Hey Helio, open Chrome"** in one breath — both work. GPU Whisper transcribes a command in about **0.4 s**, and a natural neural voice answers back.
+
 </td>
-<td width="50%">
-<h3>🧠 Sovereign Cognitive Agent</h3>
-Helio doesn't just chat. It acts. Backed by local <b>Ollama</b> models, Helio's routing engine can search your local file system, extract knowledge from your personal documents, automate Windows system controls, and answer questions using zero-API web scraping.
+<td width="50%" valign="top">
+
+### 🖐️ Hands as the controller
+Hand tracking through your webcam: a peace sign opens a command window, an open palm expands, a fist collapses, a swipe turns the carousel. **Clap** and your hand becomes a holographic **air mouse** — and in the workshop, **both hands** pick things up at once.
+
 </td>
 </tr>
 </table>
 
 ---
 
-## 📐 The Architecture of Intelligence
+## ⚒️ The Forge & the Workshop
 
-Helio is a marvel of multi-threaded asynchronous engineering. It seamlessly balances real-time perception layers (Computer Vision & Audio Processing) with heavy generative AI workloads without ever dropping a frame in the UI.
+<img src="docs/media/build.gif" alt="Helio building a multi-file website live in the workshop, code on the left and the page on the right" width="100%">
+
+<sub>Recorded live: *"build me a website for Nova, a smart home app…"* — Helio writes a multi-file project, streaming the source on the left while the page takes shape on the right. Sped up while it writes.</sub>
+
+The Forge is where Helio makes things, and the **Workshop** is its full-screen bench:
+
+- **Websites & apps** — single page or multi-file projects (HTML, CSS, JS), styled with verified CDN libraries; a dead stylesheet or script is caught and repaired before you ever see the page.
+- **Real pictures** — ask for photos and Helio searches for fitting ones itself, filters out watermarked stock, and embeds them.
+- **Charts, documents and code** — generated, saved and put on the bench.
+- **Revise by talking** — *"use the picture on screen in the last website you made"*, *"make the hero not overlap the about section"*.
+- **A bench you can grab** — every result is a slab: drag it, resize it, open it in your browser, scrap what you don't want.
+- **Edit your own files** — point it at an existing project and it edits with a backup and a diff.
+
+---
+
+## 🖥️ Planets that are real tools
+
+<img src="docs/media/system.gif" alt="Helio's System planet showing live CPU, RAM, disk and network stats" width="100%">
+
+| Planet | What it does |
+|---|---|
+| 💬 **Chat** | Talk or type; conversations are remembered and searchable |
+| 🧠 **Memory** | Facts you tell it, routines it notices, and what it has learned — all editable |
+| 📁 **Files** | Find any file by description; study documents and ask questions about them |
+| 🔥 **System** | Live CPU, RAM, disk, network and process monitoring |
+| 🗓️ **Schedule** | Events, reminders and timers that it announces ahead of time |
+| 🧩 **Setup** | Teach it a multi-step routine once, then run it by name |
+| ⚒️ **Forge** | Build, watch, open — the gateway to the Workshop |
+
+---
+
+## 🧠 An agent that acts
+
+Helio isn't a chatbot bolted onto a UI. Every request goes through a two-stage brain:
+
+1. **A deterministic fast router** handles common intents instantly — no model call, sub-millisecond, covered by **170 routing tests**.
+2. **An LLM planner** takes over for anything open-ended: it plans steps, calls tools, checks its own results with a verification pass, and asks before anything risky — scrapping builds, editing your files, launching apps or wiping its memory of you.
+
+It has **61 tools** at hand:
+
+| Area | Tools |
+|---|---|
+| **Build** | websites, apps, charts, documents, code, revise, edit existing files, scrap, open |
+| **Workshop & UI** | open the workshop, put things on it, read what's on it, open any planet |
+| **Web** | search, read pages, image search, YouTube |
+| **Files & knowledge** | search the disk, read PDFs, study documents, answer questions from them |
+| **Memory** | remember and forget facts, recall conversations, save and run workflows, learn patterns |
+| **Schedule** | events, reminders, timers |
+| **System** | launch apps, system info, date & time, **describe what's on your screen** |
+
+---
+
+## 🎛️ Under the hood
+
+Built to feel instant on a laptop (tested on an RTX 3050 with 4 GB):
+
+- **Two-path wake word** — an openWakeWord model for "Hey Helio", plus a Whisper check on the start of each sentence, so a command said in the same breath is caught *and kept*.
+- **Nothing drops audio** — the sound callback only queues; wake word, voice activity and gain run on their own worker, so a busy UI can't eat your words.
+- **Smart microphone pick** — every mic is listened to at startup; virtual devices rank last, and a muted or dead mic is reported plainly instead of failing silently.
+- **Jitter-free hands** — One Euro filtering on hand landmarks, timestamped at capture, with coalesced frame delivery so the hologram never stutters when the UI is busy.
+- **Cached holographic rendering** — orbit rings, planets, stars and panels are drawn from pixel-aligned caches, which took the solar system from **22 to 37 fps**, and the workshop from **17 to 60**.
+- **Prompt caching** — prompts are built with stable prefixes so cloud models reuse their context.
 
 ```mermaid
-graph TD
-    %% Input Sources
-    subgraph Perception [Real-World Perception]
-        Mic([Microphone]) --> |Audio Stream| WW[Wake Word Engine]
-        Mic --> |Voice Buffer| VAD[Silero VAD Filter]
-        Cam([Webcam]) --> |Video Stream| GT[MediaPipe Gesture Thread]
+graph LR
+    subgraph Perception
+        Mic([🎙️ Microphone]) --> Wake[Wake word<br/>openWakeWord + Whisper check]
+        Mic --> VAD[Silero VAD]
+        Cam([📷 Webcam]) --> Hands[MediaPipe hands<br/>One Euro filter]
     end
 
-    %% State and Routing
-    subgraph Interface [PyQt5 Holographic UI]
-        Orb[Floating Orb] <--> Space[Holographic Overlay]
+    subgraph Brain
+        STT[GPU Whisper STT] --> Router[Fast router<br/>170 tested intents]
+        Router -->|open-ended| Planner[LLM planner + verifier<br/>via Ollama]
+        Router --> Tools[61 tools]
+        Planner --> Tools
     end
 
-    subgraph Brain [Cognitive Reasoning Core]
-        AG[Intent Router & Task Planner] <--> Ollama[Ollama Local LLM]
+    subgraph Interface
+        Orb[Desktop orb] <--> Space[Holographic solar system]
+        Space <--> Workshop[Workshop]
+        AirMouse[Air mouse & hand pointers]
     end
 
-    %% Trigger workflows
-    WW --> |"Hey Helio"| Orb
-    VAD --> |Silence Detected| STT[GPU Whisper STT]
-    STT --> |Transcribed Query| AG
-    GT --> |Hand Gestures| Space
-    
-    %% Output Synthesis
-    AG --> |Response Execution| TTS[Kokoro Studio TTS]
-    TTS --> |Deep Voice Audio| Speaker([Speakers])
+    Wake --> Orb
+    VAD --> STT
+    Hands --> Space
+    Hands --> AirMouse
+    Tools --> Workshop
+    Tools --> TTS[Kokoro neural voice] --> Speaker([🔊])
 ```
 
+<details>
+<summary><b>Tech stack</b></summary>
+
+| Layer | Technology |
+|---|---|
+| Interface | PyQt5 · QGraphicsView · QtWebEngine |
+| Speech to text | faster-whisper (Distil-Whisper medium.en) on CUDA |
+| Wake word & VAD | openWakeWord (custom "Hey Helio" model) · Silero VAD |
+| Voice | Kokoro TTS |
+| Vision | MediaPipe Hands · OpenCV |
+| Reasoning | Ollama (cloud or local models) · deterministic intent router |
+| Knowledge | sentence-transformers retrieval · local memory store |
+| Web | DuckDuckGo search · lxml page reading |
+
+</details>
+
 ---
 
-## ⚡ Unleashing the Tools
+## 🚀 Get started
 
-Helio is deeply integrated into your local machine. Its cognitive routing engine dynamically selects from a massive arsenal of autonomous tools based on your requests:
+**You'll need:** Windows 10 or 11 · Python 3.9+ · [Ollama](https://ollama.com/) · a microphone · a webcam for gestures · an NVIDIA GPU is strongly recommended.
 
-* **📁 File Intelligence:** Scans your hard drive, reads documents, and extracts insights.
-* **🧠 Semantic Memory:** Indexes documents into local vector knowledge bases and remembers your personal preferences.
-* **🖥️ OS Control:** Locates apps via the Windows Registry, locks your PC, adjusts volume, and captures screenshots.
-* **🌐 Web Perception:** Scrapes live search results (Google, DuckDuckGo) without requiring any cloud API keys.
+### 1. Install
 
----
-
-## 🛠️ Get Started (100% Offline)
-
-Helio requires **no cloud subscriptions** and **no API keys**. 
-
-### 1. Build the Engine
 ```powershell
-# Create & activate the virtual environment
+git clone https://github.com/DeepanBiswas07/Helio.git
+cd Helio
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# Install the perception and AI frameworks
+# On an NVIDIA GPU, install the CUDA build of PyTorch first (much faster voice):
+pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 torchaudio==2.8.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+
 pip install -r requirements.txt
 ```
 
-### 2. Ignite the Cognitive Core
-Ensure [Ollama](https://ollama.com/) is running locally on port `11434`.
-```powershell
-# Pull the standard offline model
-ollama pull llama3:8b
+### 2. Connect a model
 
-# (Optional) For massive GPU setups, pull the heavy coders
-ollama pull qwen3-coder-next:cloud
+Helio talks to its language model through Ollama — a cloud model for the best results, or a local one.
+
+```powershell
+ollama pull gpt-oss:120b-cloud   # the default: fast and capable (needs an Ollama account)
+ollama pull llama3:8b            # local fallback
 ```
 
-### 3. Environment Setup
-Copy the template configuration file:
+### 3. Configure
+
 ```powershell
-cp .env.example .env
+copy .env.example .env
 ```
-Inside `.env`, customize your `OLLAMA_URL` and model roles.
 
----
+### 4. Launch
 
-## 🏃 Boot Sequence
-
-Launch the holographic orb directly from the root workspace:
 ```powershell
 .venv\Scripts\python ui/app.py
 ```
 
-* **Calibrate Gestures:** Run the standalone visualizer to see the raw MediaPipe mesh overlay and gesture confidence scores in real-time:
-  ```powershell
-  .venv\Scripts\python gesture/main.py
-  ```
+The orb appears on your desktop. Say **"Hey Helio"**, or click the orb.
 
 ---
 
-## 🔧 Elite Troubleshooting
+## 🗣️ Things to try
 
-#### 1. "My Camera LED isn't turning on!"
-Helio uses an **Advanced Camera Auto-Router**. If you have virtual cameras (like OBS) installed, Helio intelligently bypasses them to bind to your physical webcam (Index 1). If your camera is locked by Discord or Zoom, Helio enters a high-speed retry loop and will seize the camera the millisecond you close the conflicting app.
+| Say | What happens |
+|---|---|
+| *"Hey Helio, build me a website for a coffee shop"* | The Workshop opens and the site is written live |
+| *"Make the buttons bigger"* | Revises the last build in place |
+| *"Find me a photo of the Kolkata skyline"* | Searches, downloads and puts it on the bench |
+| *"Open the system planet"* | The carousel swings round and opens the panel |
+| *"What's on my screen?"* | Describes the current screen |
+| *"Remind me to call Ankit at 5:30"* | Sets a reminder and announces it on time |
+| *"What have you learned about me?"* | Shows the routines and preferences it has picked up |
 
-#### 2. "The app crashes silently on startup!"
-PyQt5 and GPU-accelerated STT (Whisper) have brutally complex DLL load orders. Always launch the app via `ui/app.py`. Helio uses a custom bootloader to inject the required CUDA libraries *before* the UI engine initializes.
-
-#### 3. "Helio can't hear my wake word from across the room."
-Helio applies a dynamic `8.0x` digital audio gain boost specifically for the Wake Word listener. If it still fails, ensure your default Windows microphone is set correctly, or check the startup terminal logs to see which microphone hardware index Helio automatically seized.
+**Gestures:** ✌️ peace sign → then 🖐️ palm to expand, ✊ fist to collapse, swipe to turn planets · 👏 clap to toggle the air mouse · 🤏 pinch to click, hold to drag.
 
 ---
+
+## ⚙️ Configuration
+
+All settings live in `.env` (see [`.env.example`](.env.example)).
+
+| Variable | Purpose |
+|---|---|
+| `FAST_MODEL` / `HEAVY_MODEL` | Ollama models for routing and for heavier work |
+| `LOCAL_MODEL` | Fallback model when the cloud is unreachable |
+| `VISION_MODEL` | Model used for "what's on my screen?" |
+| `HELIO_MIC` | Force a microphone by name or index |
+| `HELIO_WAKE_WHISPER` | `0` turns off the one-breath wake check |
+| `HELIO_STT_MODEL` | Swap the speech-to-text model |
+
+> **Privacy:** wake word, speech recognition, voice, hand tracking and memory all run on your machine. Requests go to the Ollama model you configure — local or cloud — and "what's on my screen?" sends a screenshot to your vision model.
+
+---
+
+## 🔧 Troubleshooting
+
+<details>
+<summary><b>Helio can't hear me</b></summary>
+
+At startup Helio listens to every microphone for half a second and uses the best one that actually carries sound. The log lists each as `live` or `silent`. If it prints **`[MIC] … is sending pure silence`**, something below Helio is muting the mic: check the keyboard's mic-mute key, audio apps such as Nahimic, and *Settings › System › Sound › Input › Test your microphone*. Plug in a headset and Helio switches to it. To force a device, set `HELIO_MIC` in `.env`.
+</details>
+
+<details>
+<summary><b>The camera light doesn't come on</b></summary>
+
+Helio skips virtual cameras (such as OBS) and binds to your physical webcam. If another app holds the camera, Helio keeps retrying and takes it the moment it is free.
+</details>
+
+<details>
+<summary><b>The app closes on startup</b></summary>
+
+Always launch through `ui/app.py`: it loads the CUDA libraries for speech recognition before the interface starts, which avoids DLL conflicts on Windows.
+</details>
+
+<details>
+<summary><b>Gestures feel off</b></summary>
+
+Run the standalone visualiser to see the tracked hands and gesture state live:
+
+```powershell
+.venv\Scripts\python gesture/main.py
+```
+</details>
+
+---
+
+## 🗂️ Project map
+
+```
+Helio/
+├── ui/
+│   ├── app.py            ← start here
+│   ├── orb/              desktop orb, solar system, planets, panels, workshop
+│   ├── voice/            wake word, microphone pick, recording, speech-to-text, voice
+│   └── services/         reminders, schedule, background learning
+├── src/
+│   ├── agent.py          request handling, planning and verification
+│   ├── routing/          fast intent router and LLM planner
+│   ├── tools/            the 61 tools (forge, web, files, memory, system…)
+│   └── memory/           facts, observations, schedule, retrieval
+├── gesture/              hand tracking, gestures, air mouse
+├── evals/                routing test suite  (python evals/run.py)
+└── models/               "Hey Helio" wake word model, voice
+```
+
+---
+
+## 📜 License
+
+Helio is released under the [PolyForm Noncommercial License 1.0.0](LICENSE.md) — free to use, study and modify for personal and non-commercial purposes. Commercial use requires a separate license: [get in touch](https://github.com/DeepanBiswas07).
+
 <div align="center">
-  <img src="https://img.shields.io/badge/Built_by-Deepan-000000?style=for-the-badge&logo=github&logoColor=white" />
-  <br>
-  <b>Engineered for the future. Built by <a href="https://github.com/DeepanBiswas07">Deepan</a>.</b><br>
-  <i>Welcome to Helio.</i>
+<br>
+
+**Designed and built by [Deepan Biswas](https://github.com/DeepanBiswas07)**
+
+<sub>If Helio made you smile, a ⭐ goes a long way.</sub>
+
 </div>

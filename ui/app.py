@@ -45,11 +45,15 @@ import traceback
 
 # Setup safe crash logging to prevent PyQt recursive excepthook crashes
 def safe_excepthook(exc_type, exc_value, exc_tb):
-    print("\n" + "="*50)
-    print("[*] HELIO CRASH DETECTED [*]")
-    print("="*50)
-    traceback.print_exception(exc_type, exc_value, exc_tb)
-    print("="*50 + "\n")
+    try:
+        print("\n" + "="*50)
+        print("[*] HELIO CRASH DETECTED [*]")
+        print("="*50)
+        lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+        print("".join(lines).encode("ascii", "replace").decode("ascii"))
+        print("="*50 + "\n")
+    except Exception:
+        pass
     
 sys.excepthook = safe_excepthook
 
@@ -65,8 +69,12 @@ class ConsoleReader(QObject):
     """
     Background-threaded console input reader for testing Helio from the terminal.
     Type 'helio' to simulate a wake word detection and enter the full listen → agent flow.
+    Type 'airmouse' or 'mouse' to toggle the Desktop Hologram Air Mouse.
+    Type 'clap' to simulate the two-hand clap gesture.
     """
     wakeword_triggered = pyqtSignal(str, float)  # (wakeword_name, score)
+    airmouse_triggered = pyqtSignal()            # Toggle air mouse
+    clap_triggered     = pyqtSignal()            # Simulate clap gesture
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,7 +91,14 @@ class ConsoleReader(QObject):
         print("    Built by Deepan")
         print("    GitHub: https://github.com/DeepanBiswas07")
         print("="*50)
-        print("  Type 'helio' + Enter to trigger the wake word.")
+        print("  Commands:")
+        print("    • 'helio'    + Enter -> Trigger wake word / voice assistant")
+        print("    • 'airmouse' + Enter -> Toggle Desktop Hologram Air Mouse")
+        print("    • 'clap'     + Enter -> Simulate CLAP gesture to toggle Air Mouse")
+        print("  Camera Gestures:")
+        print("    • CLAP hands in camera view -> Toggle Air Mouse on/off (3s cooldown)")
+        print("    • Tap (Pinch < 2.0s)        -> Left Click")
+        print("    • Hold (Pinch >= 2.0s)       -> Grab & Drag")
         print("="*50 + "\n")
 
         while True:
@@ -91,9 +106,16 @@ class ConsoleReader(QObject):
                 line = sys.stdin.readline()
                 if not line:
                     break
-                if line.strip().lower() == "helio":
+                cmd = line.strip().lower()
+                if cmd == "helio":
                     print("[Console] Wake word triggered via terminal.")
                     self.wakeword_triggered.emit("helio", 1.0)
+                elif cmd in ("airmouse", "mouse"):
+                    print("[Console] Air Mouse toggle requested via terminal.")
+                    self.airmouse_triggered.emit()
+                elif cmd == "clap":
+                    print("[Console] Simulated CLAP gesture via terminal.")
+                    self.clap_triggered.emit()
             except Exception:
                 break
 
@@ -102,6 +124,13 @@ def run():
     # High-DPI support
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+
+    # The Forge renders live pages in a QWebEngineView. Chromium shares an
+    # OpenGL context with the rest of Qt, and that has to be agreed before
+    # the QApplication exists — set it afterwards and importing the Forge
+    # panel raises "must be imported ... before a QCoreApplication instance
+    # is created" and the whole app dies at startup.
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
@@ -112,6 +141,8 @@ def run():
     # Start the office console input reader
     reader = ConsoleReader(win)
     reader.wakeword_triggered.connect(win._on_wakeword_detected)
+    reader.airmouse_triggered.connect(win.toggle_air_mouse)
+    reader.clap_triggered.connect(lambda: win._on_gesture_event("CLAP", {}))
     reader.start()
 
     # Tiny periodic timer to periodically yield event loop to Python interpreter

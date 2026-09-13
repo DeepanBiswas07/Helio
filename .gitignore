@@ -30,8 +30,9 @@ desktop.ini
 .DS_Store
 
 # Local Application Data & Personal Memory (GitIgnore)
-data/app_cache.json
-data/memory/
+# Everything Helio writes at runtime: memory, schedule, builds, the workshop
+# layout and pictures fetched from the web. Recreated on first run.
+data/
 
 # Biometric & Face Recognition Data (GitIgnore)
 gesture/faces.pt

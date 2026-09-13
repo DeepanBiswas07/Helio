@@ -20,22 +20,23 @@ Visual Features:
 import math
 import random
 
-from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsObject, QApplication
+from PyQt5.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsObject, QGraphicsItem,
+                             QApplication, QWidget)
 from PyQt5.QtCore import (Qt, QVariantAnimation, QEasingCurve, QPointF, QPoint,
-                          QRectF, QTimer, pyqtSignal)
+                          QRectF, QRect, QTimer, pyqtSignal, QPropertyAnimation)
 from PyQt5.QtGui import (QPainter, QRadialGradient, QConicalGradient, QLinearGradient,
-                         QColor, QPen, QRegion, QPainterPath, QBrush)
+                         QColor, QPen, QRegion, QPainterPath, QBrush, QPixmap)
 
 from orb.config import WIN_SIZE, FRAME_TIME
 from orb.planets import get_planets
 from orb.panels.panel_0 import Panel0
-from orb.panels.panel_1 import Panel1
+from orb.panels.setup_panel import SetupPanel, SetupWidget
 from orb.panels.memory import MemoryPanel, MemoryWidget
 from orb.panels.chat import ChatPanel, ChatWidget
-from orb.panels.files import FilesPanel
+from orb.panels.files import FilesPanel, FilesWidget
 from orb.panels.system import SystemPanel, SystemWidget
-from orb.panels.panel_6 import Panel6
-from orb.panels.panel_7 import Panel7
+from orb.panels.schedule_panel import SchedulePanel, ScheduleWidget
+from orb.panels.forge_panel import ForgePanel, ForgeWidget
 
 
 # ── scene constants ─────────────────────────────────────────
@@ -51,6 +52,29 @@ _RINGS = []
 
 _STAR_COUNT = 1200
 _SCALE_FACTOR = 3.0
+
+
+def _build_tick_paths():
+    """
+    HUD tick marks at unit radius, built once at import. The painter scales and
+    rotates these each frame, so no per-frame trigonometry or per-tick draw
+    calls are needed — just two drawPath calls.
+    """
+    minor = QPainterPath()
+    major = QPainterPath()
+    for deg in range(0, 360, 6):
+        rad = math.radians(deg)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        if deg % 30 == 0:
+            inner, outer, path = 0.94, 1.06, major
+        else:
+            inner, outer, path = 0.97, 1.03, minor
+        path.moveTo(cos_a * inner, sin_a * inner)
+        path.lineTo(cos_a * outer, sin_a * outer)
+    return minor, major
+
+
+_HUD_MINOR_TICKS, _HUD_MAJOR_TICKS = _build_tick_paths()
 
 
 # ── SpaceSunItem ────────────────────────────────────────────
@@ -104,12 +128,17 @@ class SpaceSunItem(QGraphicsObject):
             for i in range(_pc)
         ]
 
-        # 3. Flare arcs are intentionally disabled for the fullscreen scene.
-        self._flares = []
+        # 3. Flare arcs — a handful of live hairline flares for a "living star" feel.
+        self._flares = [self._new_flare() for _ in range(4)]
 
-        # 4. Ambient particles
+        # HUD instrument layer — scan sweep + tick ring, the "this is a machine
+        # analyzing a star" layer that sits on top of the organic plasma.
+        self._sweep_angle = random.uniform(0, 360)
+        self._sweep_speed = 0.62
+
+        # 4. Ambient particles (2 draws each per frame)
         self._particles = []
-        for _ in range(90):
+        for _ in range(55):
             self._particles.append({
                 "angle": random.uniform(0, 360),
                 "dist": random.uniform(_SUN_R * 0.28, _SUN_R * 1.18),
@@ -129,7 +158,9 @@ class SpaceSunItem(QGraphicsObject):
                 "alpha": random.randint(80, 170),
                 "width": random.uniform(0.42, 1.25),
             }
-            for _ in range(42)
+            # Each filament rebuilds a curved path and strokes it twice every
+            # frame, so this count is the sun's single biggest cost lever.
+            for _ in range(24)
         ]
 
         self._timer = QTimer()
@@ -149,9 +180,17 @@ class SpaceSunItem(QGraphicsObject):
         }
 
     def _tick(self):
+        # Nothing to animate behind a full-screen workshop (see space_hidden).
+        scene = self.scene()
+        if scene is not None:
+            for view in scene.views():
+                if getattr(view, "space_hidden", None) and view.space_hidden():
+                    return
+
         self._t    += _PULSE_SPD
         self._pulse = math.sin(self._t)
         self._orbit_t = (self._orbit_t + 0.42) % 360
+        self._sweep_angle = (self._sweep_angle + self._sweep_speed) % 360
 
         # Rotate orbital ring particles
         for ring in self._rings:
@@ -226,12 +265,20 @@ class SpaceSunItem(QGraphicsObject):
 
         painter.setCompositionMode(QPainter.CompositionMode_Screen)
 
+        # Layer order is also a cost order — the two layers dropped here
+        # (surface mottling's composition-mode flips, and the 60-blob desktop
+        # plasma surface) cost more per frame than they added on top of the
+        # filaments and sphere blobs already covering that texture role.
         self._draw_corona(painter)
         self._draw_plasma_sphere(painter)
         self._draw_plasma_filaments(painter)
         self._draw_hologram_shell(painter)
         self._draw_surface_sparks(painter)
+        self._draw_limb_brightening(painter)
+        self._draw_desktop_flare_arcs(painter, QPointF(0, 0))
         self._draw_photosphere_outline(painter)
+        self._draw_desktop_rings(painter, QPointF(0, 0))
+        self._draw_hud_instruments(painter)
 
         # Reset composition mode back to normal
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
@@ -283,12 +330,13 @@ class SpaceSunItem(QGraphicsObject):
         r = _SUN_R + self._pulse * 3.5
 
         outer = QRadialGradient(center, r * 1.16)
-        outer.setColorAt(0.00, QColor(255, 236, 150, 238))
-        outer.setColorAt(0.18, QColor(255, 180,  24, 228))
-        outer.setColorAt(0.42, QColor(255, 116,   0, 184))
-        outer.setColorAt(0.70, QColor(185,  48,   0, 104))
-        outer.setColorAt(0.92, QColor(255, 138,  10, 78))
-        outer.setColorAt(1.00, QColor(255,  80,   0, 0))
+        outer.setColorAt(0.00, QColor(255, 253, 224, 250))
+        outer.setColorAt(0.12, QColor(255, 224, 120, 240))
+        outer.setColorAt(0.28, QColor(255, 168,  30, 224))
+        outer.setColorAt(0.48, QColor(244, 108,   4, 178))
+        outer.setColorAt(0.70, QColor(196,  54,   0, 122))
+        outer.setColorAt(0.90, QColor(255, 132,  10,  70))
+        outer.setColorAt(1.00, QColor(255,  80,   0,   0))
         painter.setPen(Qt.NoPen)
         painter.setBrush(outer)
         painter.drawEllipse(center, r * 1.08, r * 1.08)
@@ -314,6 +362,101 @@ class SpaceSunItem(QGraphicsObject):
             grad.setColorAt(1.00, QColor(180,  42,   0, 0))
             painter.setBrush(grad)
             painter.drawEllipse(QPointF(px, py), blob_r, blob_r)
+
+    def _draw_surface_mottling(self, painter):
+        """
+        Soft dark patches breaking up the sphere's surface for texture/depth —
+        everything else on the sun is drawn in Screen mode (which can only ever
+        brighten), so this pass switches to Multiply for a moment to actually
+        darken a few spots, the way real granulation/sunspots read against a
+        photosphere.
+        """
+        center = QPointF(0, 0)
+        r = _SUN_R + self._pulse * 3.5
+
+        painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+        painter.setPen(Qt.NoPen)
+        for i in range(5):
+            angle = self._t * (0.14 + i * 0.05) + i * 2.1
+            px = math.cos(angle) * r * (0.2 + i * 0.11)
+            py = math.sin(angle * 0.8 + i) * r * (0.14 + i * 0.07)
+            spot_r = r * (0.30 - i * 0.03)
+            grad = QRadialGradient(QPointF(px, py), spot_r)
+            grad.setColorAt(0.00, QColor(140, 60, 10, 60))
+            grad.setColorAt(0.60, QColor(180, 90, 20, 30))
+            grad.setColorAt(1.00, QColor(255, 255, 255, 0))
+            painter.setBrush(grad)
+            painter.drawEllipse(QPointF(px, py), spot_r, spot_r)
+        painter.setCompositionMode(QPainter.CompositionMode_Screen)
+
+    def _draw_limb_brightening(self, painter):
+        """A crisp bright rim just inside the sphere's edge — the classic
+        limb-brightening cue that reads instantly as 'star' rather than 'ball'."""
+        center = QPointF(0, 0)
+        r = (_SUN_R + self._pulse * 3.5) * 0.99
+
+        pen = QPen(QColor(255, 236, 170, 130))
+        pen.setWidthF(3.2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(center, r, r)
+
+        pen2 = QPen(QColor(255, 250, 220, 70))
+        pen2.setWidthF(1.1)
+        painter.setPen(pen2)
+        painter.drawEllipse(center, r * 1.01, r * 1.01)
+
+    def _draw_hud_instruments(self, painter):
+        """
+        Instrument-panel layer: a tick-marked measurement ring plus a rotating
+        scan sweep, sitting just outside the photosphere. This is the layer
+        that reads as 'a system is actively analyzing this star' rather than
+        just 'a glowing ball' — kept entirely in the amber/gold solar palette.
+        """
+        center = QPointF(0, 0)
+        ring_r = (_SUN_R + self._pulse * 3.5) * 1.18
+
+        # The 60 tick marks are fixed relative to each other — only the ring's
+        # radius and overall rotation change per frame. So they're built once as
+        # unit-radius paths and then just rotated/scaled by the painter, which
+        # turns 60 trig-computed drawLine calls per frame into 2 drawPath calls.
+        painter.save()
+        painter.rotate(self._t * 6.0)
+        painter.scale(ring_r, ring_r)
+
+        minor_pen = QPen(QColor(255, 202, 110, 62))
+        minor_pen.setWidthF(0.6)
+        minor_pen.setCosmetic(True)   # keep stroke width constant despite scale()
+        painter.setPen(minor_pen)
+        painter.drawPath(_HUD_MINOR_TICKS)
+
+        major_pen = QPen(QColor(255, 202, 110, 150))
+        major_pen.setWidthF(1.3)
+        major_pen.setCosmetic(True)
+        painter.setPen(major_pen)
+        painter.drawPath(_HUD_MAJOR_TICKS)
+        painter.restore()
+
+        # Thin base ring joining the ticks
+        pen = QPen(QColor(255, 190, 90, 58))
+        pen.setWidthF(0.7)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(center, ring_r, ring_r)
+
+        # Rotating scan sweep — a soft wedge of brightness travelling around the
+        # tick ring. A few fading arcs render far cheaper than stroking a full
+        # conical gradient every frame, and read the same in motion.
+        rect = QRectF(-ring_r, -ring_r, ring_r * 2, ring_r * 2)
+        for i in range(4):
+            a = int(150 * (1.0 - i * 0.24))
+            if a <= 0:
+                continue
+            spen = QPen(QColor(255, 220, 140, a))
+            spen.setWidthF(1.6)
+            spen.setCapStyle(Qt.RoundCap)
+            painter.setPen(spen)
+            painter.drawArc(rect, int((self._sweep_angle - i * 7) * 16), int(7 * 16))
 
     def _draw_plasma_filaments(self, painter):
         """Curved lightning-like threads inside the plasma ball."""
@@ -347,25 +490,27 @@ class SpaceSunItem(QGraphicsObject):
             painter.drawPath(path)
 
     def _draw_hologram_shell(self, painter):
-        """Latitude/longitude lines wrapped around the glowing ball."""
+        """Latitude/longitude wireframe wrapped around the glowing ball — the
+        holographic-projection cue that separates 'AI HUD' from 'plain star'."""
         painter.setBrush(Qt.NoBrush)
-        r = _SUN_R * 1.04
+        r = _SUN_R * 1.05
 
-        for i, tilt in enumerate((-0.64, -0.40, -0.20, 0.0, 0.20, 0.40, 0.64)):
-            ry = r * math.sqrt(max(0.08, 1.0 - tilt * tilt)) * 0.24
+        for i, tilt in enumerate((-0.72, -0.52, -0.32, -0.12, 0.0, 0.12, 0.32, 0.52, 0.72)):
+            ry = r * math.sqrt(max(0.06, 1.0 - tilt * tilt)) * 0.26
             y = r * tilt
             rect = QRectF(-r, y - ry, r * 2, ry * 2)
-            pen = QPen(QColor(255, 150, 18, 52 if i != 3 else 96))
-            pen.setWidthF(0.72 if i != 3 else 1.08)
+            is_equator = abs(tilt) < 0.01
+            pen = QPen(QColor(255, 214, 130, 150 if is_equator else 92))
+            pen.setWidthF(1.35 if is_equator else 0.85)
             painter.setPen(pen)
             painter.drawEllipse(rect)
 
-        for deg in range(0, 180, 18):
+        for deg in range(0, 180, 15):
             painter.save()
             painter.rotate(deg + self._t * 4.0)
             rect = QRectF(-r, -r * 0.24, r * 2, r * 0.48)
-            pen = QPen(QColor(230, 88, 0, 40))
-            pen.setWidthF(0.48)
+            pen = QPen(QColor(255, 180, 90, 62))
+            pen.setWidthF(0.62)
             painter.setPen(pen)
             painter.drawEllipse(rect)
             painter.restore()
@@ -381,8 +526,11 @@ class SpaceSunItem(QGraphicsObject):
             alpha = max(0, min(255, int(p["alpha"])))
             pt = QPointF(px, py)
 
-            painter.setBrush(QColor(255, 96, 0, int(alpha * 0.24)))
-            painter.drawEllipse(pt, size * 3.6, size * 3.6)
+            # Only the larger sparks earn a glow pass — on the small ones it's
+            # a sub-pixel halo nobody can see, at double the draw cost.
+            if size > 1.5:
+                painter.setBrush(QColor(255, 96, 0, int(alpha * 0.24)))
+                painter.drawEllipse(pt, size * 3.6, size * 3.6)
             painter.setBrush(QColor(255, 165, 38, int(alpha * 0.82)))
             painter.drawEllipse(pt, size, size)
 
@@ -572,6 +720,24 @@ class SpaceSunItem(QGraphicsObject):
 
 # ── HelioSpaceOverlay ───────────────────────────────────────
 
+class _SpaceStill(QWidget):
+    """A still of the solar system, shown while the workshop shrinks away."""
+
+    def __init__(self, parent, pixmap):
+        super().__init__(parent)
+        self._pixmap = pixmap
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setClipRegion(event.region())
+        # Source, not SourceOver: the still carries the overlay's own alpha
+        # and must replace whatever was there, not blend onto it.
+        p.setCompositionMode(QPainter.CompositionMode_Source)
+        p.drawPixmap(0, 0, self._pixmap)
+        p.end()
+
+
 class HelioSpaceOverlay(QGraphicsView):
     collapsed = pyqtSignal()
 
@@ -603,6 +769,12 @@ class HelioSpaceOverlay(QGraphicsView):
             )
             for _ in range(_STAR_COUNT)
         ]
+
+        # Baked star-field layers (see _ensure_star_cache). Star positions never
+        # change, so they're rendered once into 3 depth pixmaps and blitted with
+        # per-layer parallax instead of redrawing 1200 stars every frame.
+        self._star_layers = []
+        self._star_cache_key = None
 
         # Load background image dynamically
         import os
@@ -659,14 +831,14 @@ class HelioSpaceOverlay(QGraphicsView):
         # Planet & panel renderers — edit orb/planets.py and orb/panels.py to customise each
         self._planet_renderers = get_planets()
         self._panel_renderers  = [
-            Panel0("PLANET 0", QColor(255, 140, 40)),
-            Panel1("PLANET 1", QColor(255, 140, 40)),
+            Panel0(),
+            SetupPanel(),
             MemoryPanel(),
             ChatPanel(),
             FilesPanel(),
             SystemPanel(),
-            Panel6("PLANET 6", QColor(255, 140, 40)),
-            Panel7("PLANET 7", QColor(255, 140, 40)),
+            SchedulePanel(),
+            ForgePanel(),
         ]
         
         self.panel_anim = QVariantAnimation()
@@ -694,11 +866,50 @@ class HelioSpaceOverlay(QGraphicsView):
         self.chat_proxy.setZValue(100) # Draw on top of panels
         self.chat_proxy.hide()
 
+        # Files UI Integration (Planet 4)
+        self.schedule_widget = ScheduleWidget()
+        self.schedule_proxy = self.scene.addWidget(self.schedule_widget)
+        self.schedule_proxy.setZValue(100)
+        self.schedule_proxy.hide()
+
+        self.setup_widget = SetupWidget()
+        self.setup_proxy = self.scene.addWidget(self.setup_widget)
+        self.setup_proxy.setZValue(100)
+        self.setup_proxy.hide()
+
+        self.files_widget = FilesWidget()
+        self.files_widget.ask_in_chat.connect(self._on_files_ask_in_chat)
+        self.files_proxy = self.scene.addWidget(self.files_widget)
+        self.files_proxy.setZValue(100)
+        self.files_proxy.hide()
+
         # System UI Integration (Planet 5)
         self.system_widget = SystemWidget()
         self.system_proxy = self.scene.addWidget(self.system_widget)
         self.system_proxy.setZValue(100)
         self.system_proxy.hide()
+
+        # Forge UI Integration (Planet 7)
+        self.forge_widget = ForgeWidget()
+        self.forge_proxy = self.scene.addWidget(self.forge_widget)
+        self.forge_proxy.setZValue(100)
+        self.forge_proxy.hide()
+
+        # Each panel re-rendered its whole widget into the scene on every
+        # frame of the solar system, changed or not: with the Forge panel open
+        # that dropped the frame rate from 23 to 17 fps. Cached, a panel is
+        # re-rendered only when something in it actually updates.
+        for proxy in (self.memory_proxy, self.chat_proxy, self.schedule_proxy,
+                      self.setup_proxy, self.files_proxy, self.system_proxy,
+                      self.forge_proxy):
+            proxy.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
+        # Swing the Forge into view the moment a build starts, so the page is
+        # watched being written rather than presented once it is finished.
+        self.forge_widget.build_began.connect(
+            lambda: self.trigger_planet(7, auto_open=True))
+        self.workshop = None
+        self.forge_widget.workshop_wanted.connect(self._raise_workshop)
+        self.forge_widget.handed_off.connect(self._hand_off)
 
         # Timer for animating click effects at 60 FPS
         self._effect_timer = QTimer(self)
@@ -706,6 +917,10 @@ class HelioSpaceOverlay(QGraphicsView):
         self._effect_timer.start(FRAME_TIME)
 
     def _tick_click_effects(self):
+        # Nothing to animate behind a full-screen workshop (see space_hidden).
+        if self.space_hidden():
+            return
+
         # Smoothly ease the hover visual expansion scale factor
         self._hover_scale += (self._hover_scale_target - self._hover_scale) * 0.1
         
@@ -755,6 +970,303 @@ class HelioSpaceOverlay(QGraphicsView):
 
     # ── background (star field + deep space) ────────────────
 
+    _STAR_MARGIN = 64          # px of slack around the cache for parallax travel
+    _STAR_LAYERS = (           # (max star size for this layer, parallax strength)
+        (0.45, 14.0),
+        (0.75, 30.0),
+        (99.0, 48.0),
+    )
+
+    def _ensure_star_cache(self, w, h):
+        """
+        Render the star field once into one pixmap per depth layer. Star
+        positions are fixed, so the only thing that changes per frame is the
+        parallax offset — which is just where each layer gets blitted.
+        Because this runs once, each star can afford to be prettier than a
+        per-frame loop would allow.
+        """
+        key = (w, h)
+        if self._star_cache_key == key and self._star_layers:
+            return
+
+        margin = self._STAR_MARGIN
+        pw, ph = w + margin * 2, h + margin * 2
+
+        buckets = [[] for _ in self._STAR_LAYERS]
+        for sx, sy, sz, sa in self._stars:
+            for li, (max_sz, _) in enumerate(self._STAR_LAYERS):
+                if sz < max_sz:
+                    buckets[li].append((sx, sy, sz, sa))
+                    break
+
+        rng = random.Random(7)
+        layers = []
+        for li, (_, parallax) in enumerate(self._STAR_LAYERS):
+            pm = QPixmap(pw, ph)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(Qt.NoPen)
+
+            for sx, sy, sz, sa in buckets[li]:
+                # Spread across the padded pixmap so the parallax margin holds
+                # stars too, instead of drifting an empty band into view.
+                x = (sx + 1.0) * 0.5 * pw
+                y = (sy + 1.0) * 0.5 * ph
+
+                # Mostly warm amber to match the solar theme, with a minority of
+                # cooler white-blue stars so the field reads as real depth
+                # rather than a flat orange dust cloud.
+                roll = rng.random()
+                if roll < 0.16:
+                    core, halo = QColor(198, 218, 255), QColor(120, 160, 255)
+                elif roll < 0.28:
+                    core, halo = QColor(255, 244, 226), QColor(255, 200, 120)
+                else:
+                    core, halo = QColor(255, 178, 60), QColor(255, 116, 12)
+
+                if sz > 0.55:
+                    halo.setAlpha(int(sa * 0.22))
+                    p.setBrush(halo)
+                    p.drawEllipse(QPointF(x, y), sz * 2.6, sz * 2.6)
+
+                core.setAlpha(sa)
+                p.setBrush(core)
+                p.drawEllipse(QPointF(x, y), sz, sz)
+
+                # A handful of the nearest stars get a faint cross flare
+                if sz > 0.95:
+                    fp = QPen(QColor(core.red(), core.green(), core.blue(), int(sa * 0.5)))
+                    fp.setWidthF(0.6)
+                    p.setPen(fp)
+                    fl = sz * 4.0
+                    p.drawLine(QPointF(x - fl, y), QPointF(x + fl, y))
+                    p.drawLine(QPointF(x, y - fl), QPointF(x, y + fl))
+                    p.setPen(Qt.NoPen)
+
+            p.end()
+            layers.append((pm, parallax))
+
+        self._star_layers = layers
+        self._star_cache_key = key
+
+    def _ensure_backdrop_cache(self, w, h):
+        """
+        The base wash, the wallpaper photo and the vignette are three
+        full-screen pixel passes that never actually change shape — only their
+        overall opacity does, as the scene fades in. Baking them into one pixmap
+        turns ~6M pixels of per-frame gradient/scale work into a single blit.
+        """
+        key = (w, h)
+        if getattr(self, "_backdrop_cache_key", None) == key and getattr(self, "_backdrop", None):
+            return
+
+        margin = self._STAR_MARGIN
+        pw, ph = w + margin * 2, h + margin * 2
+        pm = QPixmap(pw, ph)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        # Paint the whole padded pixmap, not just the visible centre. The margin
+        # is what the parallax drifts into — leaving it transparent is what made
+        # the wallpaper look cut off along one edge when the mouse moved into a
+        # corner.
+        full = QRectF(0, 0, pw, ph)
+
+        # 1. Base dark wash (fades the desktop to theater mode)
+        p.fillRect(full, QColor(10, 5, 2, 180))
+
+        # 2. Wallpaper photo, cover-scaled so it never stretches
+        if hasattr(self, "_bg_image") and not self._bg_image.isNull():
+            p.setOpacity(0.82)
+            img_w = self._bg_image.width()
+            img_h = self._bg_image.height()
+            scale = max(pw / img_w, ph / img_h)
+            iw, ih = img_w * scale, img_h * scale
+            p.drawImage(
+                QRectF((pw - iw) / 2.0, (ph - ih) / 2.0, iw, ih),
+                self._bg_image
+            )
+            p.setOpacity(1.0)
+
+        # 3. Warm solar vignette — blooms the centre, sinks the edges.
+        # Radius still keyed to the visible width so the look is unchanged; the
+        # margin simply picks up the darkest outer stop.
+        grad = QRadialGradient(full.center(), w * 0.68)
+        grad.setColorAt(0.00, QColor(255, 120,   0,  75))
+        grad.setColorAt(0.24, QColor( 44,  16,   2,  45))
+        grad.setColorAt(0.68, QColor(  8,   2,   0, 120))
+        grad.setColorAt(1.00, QColor(  0,   0,   0, 215))
+        p.fillRect(full, grad)
+        p.end()
+
+        self._backdrop = pm
+        self._backdrop_cache_key = key
+
+    # ── cached drawing ───────────────────────────────────────────────────────
+
+    # Off only to check the caches against live drawing.
+    DRAW_CACHES = True
+
+    def _draw_ring_arcs(self, painter, i, ring, rx, ry, alpha):
+        """
+        One orbit ring's arcs, centred on the painter's origin.
+
+        That was 200 antialiased arc segments a frame across the five rings.
+        Once the solar system has finished opening, a ring only drifts, so it
+        is baked into a pixmap and blitted: 4.1 ms -> 1.6 ms for all five
+        (offscreen), indistinguishable at 0.06/255.
+        """
+        settled = (self.DRAW_CACHES and self.progress >= 0.999
+                   and (self.panel_progress <= 0.001 or self.panel_progress >= 0.999))
+        if not settled:
+            self._stroke_ring_arcs(painter, ring, rx, ry, alpha, self.progress)
+            return
+
+        dpr = painter.device().devicePixelRatioF()
+        pad = ring["width"] * 2 + 3
+
+        # A pixmap lands on whole device pixels, but the ring it replaces sat
+        # between them: blitted as-is, every thin arc was up to half a pixel
+        # off. So the pixmap goes on a whole pixel and the arcs are baked at
+        # the sub-pixel offset they should have — to a quarter pixel, so a
+        # slowly drifting ring re-bakes every few frames instead of every one.
+        device = painter.deviceTransform()
+        at = device.map(QPointF(-rx - pad, -ry - pad))
+        sx, sy = math.floor(at.x()), math.floor(at.y())
+        qx, qy = round((at.x() - sx) * 4) / 4, round((at.y() - sy) * 4) / 4
+        if qx >= 1.0:
+            sx, qx = sx + 1, 0.0
+        if qy >= 1.0:
+            sy, qy = sy + 1, 0.0
+
+        key = (round(rx, 2), round(ry, 2), alpha, dpr, qx, qy)
+        cache = self.__dict__.setdefault("_ring_cache", {})
+        entry = cache.get(i)            # one bake per ring: they are large
+        if entry is None or entry[0] != key:
+            width = int((2 * rx + 2 * pad) * dpr) + 2
+            height = int((2 * ry + 2 * pad) * dpr) + 2
+            pixmap = entry[1] if (entry is not None and entry[1].width() == width
+                                  and entry[1].height() == height) else None
+            if pixmap is None:
+                pixmap = QPixmap(width, height)
+                pixmap.setDevicePixelRatio(dpr)
+            pixmap.fill(Qt.transparent)
+            p = QPainter(pixmap)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.translate(rx + pad + qx / dpr, ry + pad + qy / dpr)
+            self._stroke_ring_arcs(p, ring, rx, ry, alpha, self.progress)
+            p.end()
+            entry = cache[i] = (key, pixmap)
+        painter.drawPixmap(device.inverted()[0].map(QPointF(sx, sy)), entry[1])
+
+    @staticmethod
+    def _stroke_ring_arcs(painter, ring, rx, ry, alpha, progress):
+        # ── Draw the Ring with 3D Depth Perspective ──
+        # Qt drawArc: angle 0=right, 90=TOP (back), 270=BOTTOM (front)
+        # So depth = -sin(angle): front (270°) gets depth=1, back (90°) gets depth=0
+        painter.setBrush(Qt.NoBrush)
+        # 40 segments still reads as a smooth depth gradient around the
+        # ellipse while nearly halving the per-frame arc draws.
+        seg_count = 40
+        rect = QRectF(-rx, -ry, rx * 2, ry * 2)
+        for seg in range(seg_count):
+            seg_angle = (seg / seg_count) * 360.0
+            depth = (-math.sin(math.radians(seg_angle)) + 1.0) / 2.0  # 0.0=back(top) 1.0=front(bottom)
+            seg_alpha = int(alpha * (0.18 + 0.60 * depth))
+            seg_w = ring["width"] * progress * (0.5 + 1.5 * depth)
+            if seg_alpha <= 0:
+                continue
+            pen = QPen(QColor(255, int(128 + 56 * depth), 22, seg_alpha))
+            pen.setWidthF(seg_w)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawArc(rect, int(seg_angle * 16), int((360.0 / seg_count) * 16))
+
+    def _draw_star_field(self, painter, spots):
+        """
+        The three star layers as one full-screen blit instead of three.
+
+        They are composited into a single pixmap, rebuilt only when the mouse
+        parallax moves the layers relative to each other. Blending is
+        associative, so the result is the same as drawing them one by one.
+        """
+        x0 = min(x for x, _, _ in spots)
+        y0 = min(y for _, y, _ in spots)
+        key = tuple((x - x0, y - y0, id(pm)) for x, y, pm in spots)
+        cached = getattr(self, "_star_composite", None)
+        if cached is None or cached[0] != key:
+            dpr = spots[0][2].devicePixelRatio()
+            width = max((x - x0) + pm.width() / dpr for x, _, pm in spots)
+            height = max((y - y0) + pm.height() / dpr for _, y, pm in spots)
+            composite = QPixmap(int(width * dpr), int(height * dpr))
+            composite.setDevicePixelRatio(dpr)
+            composite.fill(Qt.transparent)
+            p = QPainter(composite)
+            for x, y, pm in spots:
+                p.drawPixmap(x - x0, y - y0, pm)
+            p.end()
+            cached = self._star_composite = (key, composite)
+        painter.drawPixmap(x0, y0, cached[1])
+
+    def _draw_planet(self, painter, i, cx, cy, w, h, rad, alpha, hovered,
+                     inner_opacity, panel_progress, is_active, phase, hover_prog):
+        """
+        One planet, from its own small pixmap.
+
+        Eight planets of layered gradients, pings and sweeps cost ~13 ms a
+        frame, a third of the whole solar system. Each is now drawn into its
+        own pixmap and half of them are redrawn on any one frame; the others
+        are blitted. Their animation still steps every frame, so nothing moves
+        slower, and anything that changes how a planet looks — hovering, the
+        carousel turning, a panel opening — redraws it straight away.
+
+        The active planet is drawn live while it morphs into its panel.
+        """
+        renderer = self._planet_renderers[i]
+        if not self.DRAW_CACHES or (is_active and panel_progress > 0.001):
+            renderer.draw(painter, i, cx, cy, w, h, rad, alpha, hovered, inner_opacity,
+                          panel_progress, is_active, phase, hover_prog)
+            return
+
+        dpr = painter.device().devicePixelRatioF()
+        # Room for the sonar rings, the hover rings, the name pill and subtitle.
+        side = int(max(2.4 * w, h + 130.0, 220.0))
+
+        # Put the pixmap on whole device pixels and draw the planet inside it
+        # at its true sub-pixel position, or its thin rings sit up to half a
+        # pixel away from where live drawing puts them.
+        device = painter.deviceTransform()
+        at = device.map(QPointF(cx - side / 2.0, cy - side / 2.0))
+        snapped = QPointF(math.floor(at.x()), math.floor(at.y()))
+        fx = round((at.x() - snapped.x()) / dpr, 3)
+        fy = round((at.y() - snapped.y()) / dpr, 3)
+
+        key = (side, round(w, 1), round(h, 1), round(rad, 1), int(alpha), bool(hovered),
+               round(inner_opacity, 3), round(panel_progress, 3), bool(is_active),
+               round(hover_prog, 3), fx, fy, dpr)
+        cache = self.__dict__.setdefault("_planet_cache", {})
+        entry = cache.get(i)
+        due = (self._planet_frame + i) % 2 == 0
+
+        if entry is None or entry[0] != key or due:
+            pixmap = entry[1] if (entry is not None and entry[0][0] == side and entry[0][-1] == dpr) else None
+            if pixmap is None:
+                pixmap = QPixmap(int(side * dpr), int(side * dpr))
+                pixmap.setDevicePixelRatio(dpr)
+            pixmap.fill(Qt.transparent)
+            p = QPainter(pixmap)
+            p.setRenderHint(QPainter.Antialiasing)
+            renderer.draw(p, i, side / 2.0 + fx, side / 2.0 + fy, w, h, rad, alpha, hovered,
+                          inner_opacity, panel_progress, is_active, phase, hover_prog)
+            p.end()
+            entry = cache[i] = (key, pixmap)
+        else:
+            renderer._maybe_tick(phase)      # keep its animation stepping
+
+        painter.drawPixmap(device.inverted()[0].map(snapped), entry[1])
+
     def drawBackground(self, painter, rect):
         if self.progress <= 0:
             return
@@ -762,43 +1274,23 @@ class HelioSpaceOverlay(QGraphicsView):
         painter.save()
         scene_rect = self.scene.sceneRect()
 
-        # 1. Base dark background (fades the desktop to theater mode)
-        painter.fillRect(scene_rect, QColor(10, 5, 2, int(180 * self.progress)))
-
-        # 2. Draw the user's custom background photo with robust Cover aspect scaling
-        if hasattr(self, "_bg_image") and not self._bg_image.isNull():
-            # Robust, premium opacity so your custom background is beautifully clear and visible
-            painter.setOpacity(self.progress * 0.82)
-            img_w = self._bg_image.width()
-            img_h = self._bg_image.height()
-            view_w = scene_rect.width()
-            view_h = scene_rect.height()
-
-            # Aspect Ratio Cover scaling calculation to prevent stretching
-            scale_x = view_w / img_w
-            scale_y = view_h / img_h
-            scale = max(scale_x, scale_y)
-
-            w = img_w * scale
-            h = img_h * scale
-            x = scene_rect.left() + (view_w - w) / 2.0
-            y = scene_rect.top()  + (view_h - h) / 2.0
-
-            # Far background parallax
-            px = self._mouse_offset.x() * 15.0 * self.progress
-            py = self._mouse_offset.y() * 15.0 * self.progress
-            painter.drawImage(QRectF(x + px, y + py, w, h), self._bg_image)
-
-        # Reset painter opacity to full for the radial vignette bloom
-        painter.setOpacity(1.0)
-
-        # 3. Cinematic warm solar radial gradient overlay (vignettes the edges, blooms the center)
-        grad = QRadialGradient(scene_rect.center(), scene_rect.width() * 0.68)
-        grad.setColorAt(0.00, QColor( 255, 120,   0, int(75 * self.progress)))
-        grad.setColorAt(0.24, QColor(  44,  16,   2, int(45 * self.progress)))
-        grad.setColorAt(0.68, QColor(   8,   2,   0, int(120 * self.progress)))
-        grad.setColorAt(1.00, QColor(   0,   0,   0, int(215 * self.progress)))
-        painter.fillRect(scene_rect, grad)
+        # 1-3. Pre-baked backdrop (base wash + wallpaper + vignette), blitted once
+        # with the same far-parallax drift the photo used to have.
+        self._ensure_backdrop_cache(int(scene_rect.width()), int(scene_rect.height()))
+        margin = self._STAR_MARGIN
+        bx = int(scene_rect.left() - margin + self._mouse_offset.x() * 15.0 * self.progress)
+        by = int(scene_rect.top() - margin + self._mouse_offset.y() * 15.0 * self.progress)
+        if self.DRAW_CACHES and self.progress >= 0.999:
+            # The backdrop is the first thing drawn onto a frame that starts
+            # out fully transparent, so copying it gives exactly what blending
+            # it does — without a per-pixel blend across the whole screen.
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.drawPixmap(bx, by, self._backdrop)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        else:
+            painter.setOpacity(self.progress)
+            painter.drawPixmap(bx, by, self._backdrop)
+            painter.setOpacity(1.0)
 
         # 3.5 Orbital Rings with Orbiting Particles
         painter.save()
@@ -841,25 +1333,7 @@ class HelioSpaceOverlay(QGraphicsView):
                 # ── Draw the Ring with 3D Depth Perspective ──
                 # Qt drawArc: angle 0=right, 90=TOP (back), 270=BOTTOM (front)
                 # So depth = -sin(angle): front (270°) gets depth=1, back (90°) gets depth=0
-                painter.setBrush(Qt.NoBrush)
-                seg_count = 72
-                for seg in range(seg_count):
-                    seg_angle = (seg / seg_count) * 360.0
-                    # Qt's drawArc uses counter-clockwise angles where 90=TOP and 270=BOTTOM.
-                    # We must INVERT the sine value so that 270 (bottom/front) gets depth=1.0 and 90 (top/back) gets depth=0.0.
-                    depth = (-math.sin(math.radians(seg_angle)) + 1.0) / 2.0  # 0.0=back(top) 1.0=front(bottom)
-                    seg_alpha = int(alpha * (0.18 + 0.60 * depth))
-                    seg_w     = ring["width"] * self.progress * (0.5 + 1.5 * depth)
-                    if seg_alpha <= 0:
-                        continue
-                    g_col = int(100 + 40 * depth)
-                    pen = QPen(QColor(255, g_col, 10, seg_alpha))
-                    pen.setWidthF(seg_w)
-                    pen.setCapStyle(Qt.RoundCap)
-                    painter.setPen(pen)
-                    painter.drawArc(QRectF(-rx, -ry, rx*2, ry*2),
-                                    int(seg_angle * 16),
-                                    int((360.0 / seg_count) * 16))
+                self._draw_ring_arcs(painter, i, ring, rx, ry, alpha)
 
                 # ── Draw Orbiting Particles ──
                 t = math.radians(self.ring_phase * ring["speed"])
@@ -889,29 +1363,32 @@ class HelioSpaceOverlay(QGraphicsView):
         
         painter.restore()
 
-        # 4. Star field
-        painter.setPen(Qt.NoPen)
-        w = scene_rect.width()
-        h = scene_rect.height()
-        for sx, sy, sz, sa in self._stars:
-            # Deep background parallax mapped to star size (depth)
-            px = self._mouse_offset.x() * (45.0 * sz) * self.progress
-            py = self._mouse_offset.y() * (45.0 * sz) * self.progress
-            x = scene_rect.left() + (sx + 1.0) * 0.5 * w + px
-            y = scene_rect.top()  + (sy + 1.0) * 0.5 * h + py
-            a = int(sa * self.progress)
-            if a <= 0:
-                continue
-            painter.setBrush(QColor(255, 116, 12, int(a * 0.20)))
-            painter.drawEllipse(QPointF(x, y), sz * 2.0, sz * 2.0)
-            painter.setBrush(QColor(255, 152, 28, a))
-            painter.drawEllipse(QPointF(x, y), sz, sz)
+        # 4. Star field — three pre-baked depth layers, each blitted with its own
+        # parallax offset. Three drawPixmap calls instead of 2400 drawEllipse.
+        w = int(scene_rect.width())
+        h = int(scene_rect.height())
+        self._ensure_star_cache(w, h)
+
+        margin = self._STAR_MARGIN
+        spots = [(int(scene_rect.left() - margin + self._mouse_offset.x() * parallax * self.progress),
+                  int(scene_rect.top() - margin + self._mouse_offset.y() * parallax * self.progress),
+                  pm)
+                 for pm, parallax in self._star_layers]
+        if self.DRAW_CACHES and self.progress >= 0.999 and spots:
+            self._draw_star_field(painter, spots)
+        else:
+            painter.setOpacity(self.progress)
+            for x, y, pm in spots:
+                painter.drawPixmap(x, y, pm)
+            painter.setOpacity(1.0)
 
         painter.restore()
 
     # ── foreground (visual overlays like click ripples/bursts) ──
 
     def drawForeground(self, painter, rect):
+        # Which half of the planets get redrawn this frame (see _draw_planet).
+        self._planet_frame = getattr(self, "_planet_frame", 0) + 1
         painter.setRenderHint(QPainter.Antialiasing)
         
         # Holographic Screen Blending Mode for click effects
@@ -1053,8 +1530,8 @@ class HelioSpaceOverlay(QGraphicsView):
                 else:
                     depth_alpha = alpha
 
-                # ── Planet orb ── delegate to planets.py renderer
-                self._planet_renderers[i].draw(
+                # ── Planet orb ── delegate to planets.py renderer, via its cache
+                self._draw_planet(
                     painter, i,
                     current_x, current_y, current_w, current_h, current_rad,
                     depth_alpha, is_hovered, inner_opacity, self.panel_progress,
@@ -1074,7 +1551,7 @@ class HelioSpaceOverlay(QGraphicsView):
                             if not self.memory_proxy.isVisible():
                                 self.memory_proxy.show()
                                 self.memory_widget._refresh()
-                            mem_rect = shape_rect.adjusted(0, 50, 0, 0)
+                            mem_rect = shape_rect.adjusted(12, 50, -12, -12)
                             self.memory_proxy.setGeometry(mem_rect)
                             self.memory_proxy.setOpacity(alpha / 255.0)
                         else:
@@ -1086,27 +1563,79 @@ class HelioSpaceOverlay(QGraphicsView):
                             if not self.chat_proxy.isVisible():
                                 self.chat_proxy.show()
                             # Use adjusted rect to match the message area background
-                            msg_rect = shape_rect.adjusted(0, 50, 0, 0)
+                            msg_rect = shape_rect.adjusted(12, 50, -12, -12)
                             self.chat_proxy.setGeometry(msg_rect)
                             self.chat_proxy.setOpacity(alpha / 255.0)
                         else:
                             self.chat_proxy.hide()
+                    # If this is the Setup panel (index 1)
+                    if i == 1:
+                        if self.panel_progress >= 0.99:
+                            if not self.setup_proxy.isVisible():
+                                self.setup_proxy.show()
+                                self.setup_widget.refresh()
+                            setup_rect = shape_rect.adjusted(12, 50, -12, -12)
+                            self.setup_proxy.setGeometry(setup_rect)
+                            self.setup_proxy.setOpacity(alpha / 255.0)
+                        else:
+                            self.setup_proxy.hide()
+                    # If this is the Files panel (index 4)
+                    if i == 4:
+                        if self.panel_progress >= 0.99:
+                            if not self.files_proxy.isVisible():
+                                self.files_proxy.show()
+                                self.files_widget.refresh_library()
+                            files_rect = shape_rect.adjusted(12, 50, -12, -12)
+                            self.files_proxy.setGeometry(files_rect)
+                            self.files_proxy.setOpacity(alpha / 255.0)
+                        else:
+                            self.files_proxy.hide()
+                    # If this is the Schedule panel (index 6)
+                    if i == 6:
+                        if self.panel_progress >= 0.99:
+                            if not self.schedule_proxy.isVisible():
+                                self.schedule_proxy.show()
+                                self.schedule_widget.refresh()
+                            schedule_rect = shape_rect.adjusted(12, 50, -12, -12)
+                            self.schedule_proxy.setGeometry(schedule_rect)
+                            self.schedule_proxy.setOpacity(alpha / 255.0)
+                        else:
+                            self.schedule_proxy.hide()
                     # If this is the System panel (index 5)
                     if i == 5:
                         if self.panel_progress >= 0.99:
                             if not self.system_proxy.isVisible():
                                 self.system_proxy.show()
-                            sys_rect = shape_rect.adjusted(0, 50, 0, 0)
+                            sys_rect = shape_rect.adjusted(12, 50, -12, -12)
                             self.system_proxy.setGeometry(sys_rect)
                             self.system_proxy.setOpacity(alpha / 255.0)
                         else:
                             self.system_proxy.hide()
+                    # If this is the Forge panel (index 7)
+                    if i == 7:
+                        if self.panel_progress >= 0.99:
+                            if not self.forge_proxy.isVisible():
+                                self.forge_proxy.show()
+                                self.forge_widget.refresh()
+                            forge_rect = shape_rect.adjusted(12, 50, -12, -12)
+                            self.forge_proxy.setGeometry(forge_rect)
+                            self.forge_proxy.setOpacity(alpha / 255.0)
+                        else:
+                            self.forge_proxy.hide()
+                elif is_active and i == 1:
+                    self.setup_proxy.hide()
                 elif is_active and i == 2:
                     self.memory_proxy.hide()
                 elif is_active and i == 3:
                     self.chat_proxy.hide()
+                elif is_active and i == 4:
+                    self.files_proxy.hide()
                 elif is_active and i == 5:
                     self.system_proxy.hide()
+                elif is_active and i == 6:
+                    self.schedule_proxy.hide()
+                elif is_active and i == 7:
+                    self.forge_proxy.hide()
 
             # 1. Draw all inactive planets (they stay in the background)
             for i in range(8):
@@ -1118,6 +1647,19 @@ class HelioSpaceOverlay(QGraphicsView):
 
 
     # ── public API ──────────────────────────────────────────
+
+    @property
+    def active_panel(self):
+        proxies = {
+            1: getattr(self, "setup_proxy", None),
+            2: getattr(self, "memory_proxy", None),
+            3: getattr(self, "chat_proxy", None),
+            4: getattr(self, "files_proxy", None),
+            5: getattr(self, "system_proxy", None),
+            6: getattr(self, "schedule_proxy", None),
+            7: getattr(self, "forge_proxy", None),
+        }
+        return proxies.get(self.active_planet_index)
 
     def open_space(self):
         if self.isVisible() and not self.is_closing:
@@ -1154,6 +1696,9 @@ class HelioSpaceOverlay(QGraphicsView):
     def close_space(self):
         if not self.isVisible() or self.is_closing:
             return
+        if getattr(self, "workshop", None) is not None and self.workshop.isVisible():
+            self.workshop.hide()
+        self._thaw_space()
         self.is_closing = True
         
         # Close panel first if open, then close UI
@@ -1180,10 +1725,15 @@ class HelioSpaceOverlay(QGraphicsView):
         self.panel_anim.setEndValue(1.0 if self.panel_mode else 0.0)
         self.panel_anim.start()
         
-        # Hide chat proxy immediately when closing starts
+        # Hide widget proxies immediately when closing starts
         if not self.panel_mode:
             self.chat_proxy.hide()
             self.memory_proxy.hide()
+            self.setup_proxy.hide()
+            self.schedule_proxy.hide()
+            self.files_proxy.hide()
+            self.system_proxy.hide()
+            self.forge_proxy.hide()
 
     def _on_panel_anim_step(self, val):
         self.panel_progress = val
@@ -1336,32 +1886,178 @@ class HelioSpaceOverlay(QGraphicsView):
                     self.toggle_panel()
                     return
 
-                # 2. Spawn shockwave ripple at click location
-                self._ripples.append({
-                    "pos": click_pos_scene,
-                    "radius": 1.0,
-                    "max_radius": 120.0,
-                    "alpha": 230.0,
-                    "fade_speed": 4.8,
-                    "expansion_speed": 4.2
-                })
-
-                # 3. Spawn energetic particle burst
-                for _ in range(20):
-                    angle = random.uniform(0, 360)
-                    speed = random.uniform(2.5, 6.0)
-                    self._burst_particles.append({
-                        "pos": QPointF(click_pos_scene),
-                        "angle": angle,
-                        "speed": speed,
-                        "size": random.uniform(1.2, 3.2),
-                        "alpha": 255.0,
-                        "fade_speed": random.uniform(4.5, 8.5),
-                        "drag": 0.94
-                    })
-                self.viewport().update()
+                # Clicking empty space does nothing. The firework burst that used
+                # to fire here wasn't tied to any action — it just added noise (and
+                # 20 live particles to animate) on every stray click. The click
+                # effect is kept only where it means something: on the sun.
 
         super().mousePressEvent(event)
+
+    # The workshop grows out of the Forge panel and shrinks back into it, so
+    # going full screen reads as the panel expanding rather than a hard cut.
+    WORKSHOP_ANIM_MS = 340
+
+    def space_hidden(self):
+        """
+        True while the workshop covers the whole solar system.
+
+        None of the scene can be seen then, but its two 60 fps timers kept
+        repainting all of it, and every workshop repaint dragged a scene render
+        along underneath. Profiled with three slabs up, the workshop ran at
+        17 fps; with the scene paused here and the canvas opaque, 62 fps.
+
+        Also true for the 340 ms the workshop spends growing or shrinking:
+        animating the whole scene behind it halved that animation's frame
+        rate, and a solar system that holds still for a third of a second
+        while the workshop swings over it is not something anyone sees.
+
+        Checked every tick rather than switched on open/close, so the solar
+        system moves again the moment the animation ends.
+        """
+        # Closed: Helio is just the orb on the desktop, and these two 60 fps
+        # timers were still stepping the sun and planets for nobody —
+        # 29 ms of UI-thread time every second, measured.
+        if not self.isVisible():
+            return True
+        surface = getattr(self, "workshop", None)
+        if surface is None or not surface.isVisible():
+            return False
+        anim = getattr(self, "_workshop_anim", None)
+        if anim is not None and anim.state() == QPropertyAnimation.Running:
+            return True
+        return surface.geometry().contains(self.rect())
+
+    def _panel_rect(self):
+        """Where the Forge panel sits, in this view's coordinates."""
+        return QRect(int(self.width() / 2 - 430),
+                     int(self.height() / 2 + 175 - 325), 860, 650)
+
+    def open_workshop(self):
+        """
+        Bring the workshop up as a panel over the solar system.
+
+        It is a child of this overlay, not a separate window: Helio stays
+        open, and there is only ever one full screen.
+        """
+        from orb.workshop.canvas import open_workshop as raise_surface
+
+        surface = raise_surface(self)
+        if surface is not self.workshop:
+            surface.closed.connect(self._workshop_closed)
+            surface.handed_off.connect(self._hand_off)
+        self.workshop = surface
+        surface.raise_()
+
+        # Anything that changes the scene while it is hidden makes a still
+        # taken earlier out of date (see _grab_still).
+        if not getattr(self, "_watching_scene", False):
+            self.scene.changed.connect(self._drop_still)
+            self._watching_scene = True
+
+        self._animate_workshop(self._panel_rect(), self.rect(),
+                               on_done=self._prepare_still)
+        return surface
+
+    def close_workshop(self):
+        surface = getattr(self, "workshop", None)
+        if surface is None or not surface.isVisible():
+            return
+        self._freeze_space_behind(surface)
+        self._animate_workshop(
+            self.rect(), self._panel_rect(), on_done=surface.close)
+
+    def _freeze_space_behind(self, surface):
+        """
+        Show a still of the solar system while the workshop shrinks away.
+
+        Shrinking uncovers more of the scene every frame, and Qt re-rendered
+        all of it each time: the close animation ran at 31 fps against 60 for
+        the open. The scene is frozen during the animation anyway (see
+        space_hidden), so one grab of it looks identical, and blitting a
+        pixmap costs next to nothing.
+        """
+        self._thaw_space()
+        pixmap = getattr(self, "_still_pixmap", None) or self.viewport().grab()
+        self._still_pixmap = None
+        still = _SpaceStill(self, pixmap)
+        still.setGeometry(self.viewport().geometry())
+        still.show()
+        # After show(): polishing with the overlay's style sheet clears it.
+        still.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        still.stackUnder(surface)
+        self.viewport().setUpdatesEnabled(False)
+        self._space_still = still
+
+    def _thaw_space(self):
+        """Back to the live scene. Safe to call any number of times."""
+        still = getattr(self, "_space_still", None)
+        self._space_still = None
+        if still is not None:
+            still.hide()
+            still.deleteLater()
+        if not self.viewport().updatesEnabled():
+            self.viewport().setUpdatesEnabled(True)
+
+    # Grabbing the still when the close starts cost one ~40 ms frame right as
+    # the workshop began to move. Taken once the workshop is up and nothing is
+    # moving, the close starts instantly. If the scene changes in the meantime
+    # the still is dropped, and the close grabs a fresh one as before.
+    STILL_DELAY_MS = 150
+
+    def _prepare_still(self):
+        QTimer.singleShot(self.STILL_DELAY_MS, self._grab_still)
+
+    def _grab_still(self):
+        if self.space_hidden() and getattr(self, "_still_pixmap", None) is None:
+            self._still_pixmap = self.viewport().grab()
+
+    def _drop_still(self, *_):
+        self._still_pixmap = None
+
+    def _animate_workshop(self, start, end, on_done=None):
+        surface = self.workshop
+        if surface is None:
+            return
+        # One animation at a time, or a fast open/close leaves the surface
+        # stranded at whatever size the interrupted one had reached.
+        existing = getattr(self, "_workshop_anim", None)
+        if existing is not None:
+            # stop() never emits finished, so an open that cuts a close short
+            # must take the still down itself or the scene never repaints.
+            if existing.state() == QPropertyAnimation.Running and end == self.rect():
+                self._thaw_space()
+            existing.stop()
+
+        surface.setGeometry(start)
+        anim = QPropertyAnimation(surface, b"geometry", self)
+        anim.setDuration(self.WORKSHOP_ANIM_MS)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.InOutCubic)
+        if on_done is not None:
+            anim.finished.connect(on_done)
+        self._workshop_anim = anim
+        anim.start()
+
+    def _hand_off(self):
+        """A build was opened in another app — stop sitting on top of it."""
+        self.close_space()
+
+    def _workshop_closed(self):
+        """Back to the solar system, with the surface kept as it was."""
+        self._thaw_space()
+        self.setFocus()
+        self.viewport().update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        workshop = getattr(self, "workshop", None)
+        if workshop is not None and workshop.isVisible():
+            workshop.setGeometry(self.rect())
+
+    def _raise_workshop(self):
+        """The OPEN WORKSHOP button on the Forge panel."""
+        self.open_workshop()
 
     def trigger_planet(self, index, rotations=None, auto_open=True):
         if self._is_shifting:
@@ -1441,17 +2137,17 @@ class HelioSpaceOverlay(QGraphicsView):
                 self.shift_planet(1)  # Swipe left -> right planet
             self._last_wheel_time = current_time
         elif abs(dy) > 10:
-            # Vertical scroll
+            # While a panel is open the wheel belongs to that panel's content —
+            # it used to close the panel instead, which made long lists
+            # unscrollable. Close via Escape, the gesture, or clicking away.
+            if self.panel_mode:
+                super().wheelEvent(event)
+                return
+
             if dy > 0:
                 # Zoom in -> open panel
-                if not self.panel_mode:
-                    self.toggle_panel()
-                    self._last_wheel_time = current_time
-            else:
-                # Zoom out -> close panel
-                if self.panel_mode:
-                    self.toggle_panel()
-                    self._last_wheel_time = current_time
+                self.toggle_panel()
+                self._last_wheel_time = current_time
         event.accept()
 
     def keyPressEvent(self, event):
@@ -1480,3 +2176,11 @@ class HelioSpaceOverlay(QGraphicsView):
         if hasattr(parent_win, 'agent_bridge'):
             parent_win.agent_bridge.on_transcription(text)
             parent_win.set_ai_state("thinking")
+
+    def _on_files_ask_in_chat(self, question):
+        """Files panel asked something — show it in Chat and send it to the agent."""
+        if hasattr(self, "chat_widget"):
+            self.chat_widget.add_message("You", question, is_user=True)
+            self.chat_widget.indicator_orb.set_state("thinking")
+        self._on_chat_message_sent(question)
+        self.trigger_planet(3, auto_open=True)

@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QTimer, QPointF, QRectF
 from PyQt5.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QBrush, QRadialGradient
+from . import workshop_style as W
 from .base import BasePanel, _content_alpha, _draw_header
 
 # ── RENDERER ──────────────────────────────────────────────────────────────────
@@ -28,16 +29,7 @@ class ChatPanel(BasePanel):
         if content_a <= 0:
             return
 
-        painter.save()
-        painter.setOpacity(content_a / 255.0)
-
-        # Message area background (glass-like to see the stars behind)
-        msg_rect = shape_rect.adjusted(16, 50, -16, 0)
-        painter.setBrush(QColor(0, 0, 0, 60))
-        painter.setPen(QPen(QColor(0, 180, 255, 30), 1))
-        painter.drawRoundedRect(msg_rect, 12, 12)
-
-        painter.restore()
+        # Header only — ChatWidget paints the body.
 
 
 # ── INTERACTIVE WIDGET COMPONENTS ─────────────────────────────────────────────
@@ -92,6 +84,9 @@ class HoloOrbWidget(QWidget):
             self.state = state
             
     def _tick(self):
+        # Nothing to animate while the chat panel is closed.
+        if not self.isVisible():
+            return
         self.phase += 0.05
         
         # Adjust dynamics based on state
@@ -204,71 +199,69 @@ class HoloOrbWidget(QWidget):
 
 
 class ChatMessageWidget(QWidget):
+    """
+    One transcript entry: a speaker tag and timestamp on the header line, the
+    message flowing full-width beneath it, and a hairline underneath.
+
+    Deliberately not a bubble. Bubbles are the chat-app idiom, and inside an
+    HBox with a stretch they also collapsed to their own sizeHint — a short
+    reply wrapped to four narrow lines in a panel that was mostly empty.
+    """
+
     def __init__(self, sender, text, time_str="14:30", is_user=False, parent=None):
         super().__init__(parent)
         self.is_user = is_user
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(12)
-        
-        # Left side avatar for Helio
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        body = QFrame()
+        body.setStyleSheet(
+            "QFrame{background:transparent;border:none;"
+            + (f"border-left:2px solid {W.CHAT.ACCENT};"
+               if is_user else f"border-left:2px solid {W.CHAT.RULE_HI};")
+            + "}"
+        )
+        inner = QVBoxLayout(body)
+        inner.setContentsMargins(12, 7, 10, 9)
+        inner.setSpacing(3)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+
         if not is_user:
-            avatar_layout = QVBoxLayout()
-            avatar_layout.setAlignment(Qt.AlignTop)
-            self.avatar = HoloOrbWidget(size=36)
-            avatar_layout.addWidget(self.avatar)
-            layout.addLayout(avatar_layout)
-            
-        # Message content bubble
-        self.bubble = QFrame()
-        self.bubble.setMaximumWidth(450)
-        
-        bubble_layout = QVBoxLayout(self.bubble)
-        bubble_layout.setContentsMargins(15, 12, 15, 12)
-        bubble_layout.setSpacing(6)
-        
-        msg_label = QLabel(text)
-        msg_label.setWordWrap(True)
-        msg_label.setStyleSheet("color: #E2EEF8; font-family: 'Segoe UI'; font-size: 13px; background: transparent; border: none;")
-        msg_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        bubble_layout.addWidget(msg_label)
-        
-        # Time and Status line
-        time_label = QLabel(time_str + (" ✓✓" if is_user else ""))
-        time_label.setAlignment(Qt.AlignRight)
-        time_label.setStyleSheet("color: #507A9A; font-family: 'Segoe UI'; font-size: 10px; background: transparent; border: none;")
-        bubble_layout.addWidget(time_label)
-        
-        # Styles (glassmorphism/glowing border matching dark theme)
-        if is_user:
-            self.bubble.setStyleSheet("""
-                QFrame {
-                    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #093356, stop:1 #021a30);
-                    border: 1px solid #0a4f85;
-                    border-radius: 14px;
-                    border-top-right-radius: 2px;
-                }
-            """)
-        else:
-            self.bubble.setStyleSheet("""
-                QFrame {
-                    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #06192b, stop:1 #010c17);
-                    border: 1px solid #0b2e4c;
-                    border-radius: 14px;
-                    border-top-left-radius: 2px;
-                }
-            """)
-            
-        layout.addWidget(self.bubble)
-        
-        # Spacing/stretch
-        if is_user:
-            # Shift bubble to the right
-            layout.insertStretch(0, 1)
-        else:
-            # Shift bubble to the left
-            layout.addStretch(1)
+            self.avatar = HoloOrbWidget(size=16)
+            head.addWidget(self.avatar)
+
+        tag = QLabel("YOU" if is_user else "HELIO")
+        tag.setFont(W.label_font(9, bold=True, tracking=2.4))
+        tag.setStyleSheet(
+            f"color:{W.CHAT.BRIGHT if is_user else W.CHAT.ACCENT};"
+            "background:transparent;border:none;")
+        head.addWidget(tag)
+        head.addStretch()
+
+        stamp = QLabel(time_str)
+        stamp.setFont(W.mono_font(8))
+        stamp.setStyleSheet(f"color:{W.CHAT.DIM};background:transparent;border:none;")
+        head.addWidget(stamp)
+        inner.addLayout(head)
+
+        msg = QLabel(text)
+        msg.setWordWrap(True)
+        msg.setFont(W.mono_font(10))
+        msg.setStyleSheet(f"color:{W.CHAT.TEXT};background:transparent;border:none;")
+        msg.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        msg.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        inner.addWidget(msg)
+
+        root.addWidget(body)
+
+        rule = QFrame()
+        rule.setFixedHeight(1)
+        rule.setStyleSheet(f"background:{W.CHAT.RULE};border:none;")
+        root.addWidget(rule)
 
 
 class ChatWidget(QWidget):
@@ -290,16 +283,9 @@ class ChatWidget(QWidget):
                 background: transparent;
                 border: none;
             }
-            QScrollBar:vertical {
-                border: none;
-                background: rgba(0,0,0,0);
-                width: 6px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(0, 150, 255, 80);
-                border-radius: 3px;
-            }
+            QScrollBar:vertical { border:none; background:transparent; width:3px; }
+            QScrollBar::handle:vertical { background:#0A5A80; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
         """)
         
         self.scroll_content = QWidget()
@@ -313,13 +299,10 @@ class ChatWidget(QWidget):
         
         # Input Area
         input_container = QFrame()
-        input_container.setStyleSheet("""
-            QFrame {
-                background-color: #020A12;
-                border: 1px solid #003355;
-                border-radius: 25px;
-            }
-        """)
+        # A command line on an instrument, not a chat pill.
+        input_container.setStyleSheet(
+            "QFrame{background:rgba(0, 20, 32, 150);border:none;"
+            f"border-top:1px solid {W.CHAT.RULE_HI};}}")
         input_layout = QHBoxLayout(input_container)
         input_layout.setContentsMargins(10, 5, 10, 5)
         input_layout.setSpacing(10)
@@ -330,45 +313,25 @@ class ChatWidget(QWidget):
         
         btn_plus = QPushButton("+")
         btn_plus.setFixedSize(40, 40)
-        btn_plus.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #00AFFF;
-                border: 1px solid #003355;
-                border-radius: 20px;
-                font-size: 20px;
-            }
-            QPushButton:hover { background: rgba(0, 150, 255, 30); }
-        """)
+        btn_plus.setFont(W.mono_font(12))
+        btn_plus.setStyleSheet(W.CHAT.CHIP)
         input_layout.addWidget(btn_plus)
         
         self.line_edit = QLineEdit()
         self.line_edit.setPlaceholderText("Message Helio...")
-        self.line_edit.setStyleSheet("""
-            QLineEdit {
-                background: transparent;
-                color: white;
-                border: none;
-                font-family: 'Segoe UI';
-                font-size: 14px;
-            }
-        """)
+        self.line_edit.setFont(W.mono_font(11))
+        self.line_edit.setStyleSheet(
+            "QLineEdit{background:transparent;border:none;"
+            f"color:{W.CHAT.BRIGHT};padding:4px 2px;"
+            f"selection-background-color:{W.CHAT.ACCENT};}}")
         self.line_edit.returnPressed.connect(self._send_clicked)
         self.line_edit.textChanged.connect(self._on_text_changed)
         input_layout.addWidget(self.line_edit, 1)
         
         btn_send = QPushButton("➢")
         btn_send.setFixedSize(40, 40)
-        btn_send.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #00AFFF;
-                border: 1px solid #003355;
-                border-radius: 20px;
-                font-size: 18px;
-            }
-            QPushButton:hover { background: rgba(0, 150, 255, 30); }
-        """)
+        btn_send.setFont(W.mono_font(12))
+        btn_send.setStyleSheet(W.CHAT.COMMAND)
         btn_send.clicked.connect(self._send_clicked)
         input_layout.addWidget(btn_send)
         
@@ -388,8 +351,10 @@ class ChatWidget(QWidget):
         time_str = now.strftime("%H:%M")
         
         msg = ChatMessageWidget(sender, text, time_str=time_str, is_user=is_user)
-        # Insert before the stretch
-        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, msg)
+        # Append *after* the stretch so the transcript is pinned to the bottom
+        # of the viewport, the way a console log reads. Inserting before it
+        # left a short conversation stranded at the top with dead space under.
+        self.scroll_layout.addWidget(msg)
         
         # Scroll to bottom
         QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
@@ -412,3 +377,7 @@ class ChatWidget(QWidget):
     def _on_typing_timeout(self):
         if self.indicator_orb.state == "typing":
             self.indicator_orb.set_state("idle")
+
+    def paintEvent(self, event):
+        """The workshop frame: flat ground, scanlines, hairline edge, brackets."""
+        W.CHAT.frame(self)

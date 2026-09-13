@@ -158,6 +158,9 @@ class HoloOverlay(QWidget):
         }
 
     def _tick(self):
+        # The orb is hidden while the solar system is open; don't animate it.
+        if not self.isVisible():
+            return
         sp = orb_state.ring_speed   # state multiplier
 
         # Breathing pulse
@@ -319,9 +322,10 @@ class HoloOverlay(QWidget):
         # 3. Photosphere core — blinding white-gold solar surface (calm ±1.5 px)
         r_core = (16.0 + self._pulse * 1.5) * (0.97 + glow * 0.03)
         grad3 = QRadialGradient(c, r_core)
-        grad3.setColorAt(0.00, QColor(255, 255, 220, min(255, int(255 * glow))))
-        grad3.setColorAt(0.35, QColor(255, 210, 60,  min(255, int(220 * glow))))
-        grad3.setColorAt(0.70, QColor(255, 130, 0,   min(255, int(130 * glow))))
+        grad3.setColorAt(0.00, QColor(255, 255, 246, min(255, int(255 * glow))))
+        grad3.setColorAt(0.22, QColor(255, 232, 130, min(255, int(238 * glow))))
+        grad3.setColorAt(0.50, QColor(255, 180, 40,  min(255, int(210 * glow))))
+        grad3.setColorAt(0.78, QColor(224, 90,  0,   min(255, int(140 * glow))))
         grad3.setColorAt(1.00, QColor(0,   0,   0,   0))
         painter.setBrush(grad3)
         painter.drawEllipse(c, r_core, r_core)

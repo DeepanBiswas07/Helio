@@ -1,70 +1,71 @@
-import os
-import tempfile
-import numpy as np
-from scipy.io.wavfile import write
+"""
+recorder.py — holds the audio of what was said after the wake word.
 
-# Minimum RMS energy a recording must have to be considered real speech.
-# Audio below this level is near-silence and will be discarded before Whisper
-# sees it, preventing hallucinations like "Thank you." from silence/noise.
-_MIN_RMS_THRESHOLD = 80
+Recording used to begin when the UI thread got round to it after the wake
+word, and everything before that was thrown away — so the first words of a
+command said without a pause were lost. Chunks now carry their position in the
+stream, the last few seconds are always kept, and a recording can begin from
+the exact sample the wake detector points at.
+
+It used to drop anything under a fixed loudness (RMS 80), which also dropped
+real speech from a quiet laptop mic. Whether a recording holds speech is now
+decided by Silero in stt.py.
+"""
+from collections import deque
+
+import numpy as np
+
 
 class SpeechRecorder:
+    PREROLL_S = 6.0
+
     def __init__(self, sample_rate=16000):
         self.sample_rate = sample_rate
         self.frames = []
-        self.preroll_buffer = []  # Keep rolling history of chunks before trigger
+        self.preroll = deque()          # (start_sample, chunk)
+        self._preroll_samples = 0
         self.is_recording = False
+        self.latest = 0                 # sample index just past the newest chunk
 
-    def start_recording(self):
-        # Start fresh after the wake word is detected to completely avoid wake word hallucinations (like "Hey, do you" or "And you")
-        self.frames = []
-        self.is_recording = True
-        print("[STT] Recorder: Started recording speech buffer (fresh, starting after wake word detection)...")
-
-    def add_frames(self, numpy_data):
-        if numpy_data.ndim > 1:
-            flat_data = numpy_data.flatten()
-        else:
-            flat_data = numpy_data
-        
-        # We always keep raw int16 data
-        data_copy = flat_data.copy()
+    def add_frames(self, data, start=None):
+        chunk = np.asarray(data).reshape(-1).astype(np.int16, copy=True)
+        if start is None:
+            start = self.latest
+        self.latest = start + len(chunk)
 
         if self.is_recording:
-            self.frames.append(data_copy)
-        else:
-            # Keep the last 20 chunks (20 * 1280 samples = 25,600 samples ≈ 1.6 seconds)
-            self.preroll_buffer.append(data_copy)
-            if len(self.preroll_buffer) > 20:
-                self.preroll_buffer.pop(0)
+            self.frames.append(chunk)
+            return
 
-    def stop_recording(self) -> str:
+        self.preroll.append((start, chunk))
+        self._preroll_samples += len(chunk)
+        while self._preroll_samples > self.PREROLL_S * self.sample_rate and len(self.preroll) > 1:
+            _, old = self.preroll.popleft()
+            self._preroll_samples -= len(old)
+
+    def start_recording(self, from_sample=None):
+        """Begin a recording; from_sample reaches back into the last few seconds."""
+        self.frames = []
+        if from_sample is not None:
+            for start, chunk in self.preroll:
+                if start + len(chunk) <= from_sample:
+                    continue
+                self.frames.append(chunk[max(0, from_sample - start):])
+        self.preroll.clear()
+        self._preroll_samples = 0
+        self.is_recording = True
+        back = sum(len(c) for c in self.frames) / self.sample_rate
+        print(f"[STT] Recorder: recording" + (f" (from {back:.2f}s back, at the wake word)" if back else "") + "...")
+
+    def stop_recording(self):
+        """The recorded int16 audio, or None."""
         if not self.is_recording:
-            return ""
+            return None
         self.is_recording = False
-        
-        # Clear pre-roll buffer so next query starts fresh
-        self.preroll_buffer = []
-
-        if not self.frames:
+        frames, self.frames = self.frames, []
+        if not frames:
             print("[STT] Recorder Warning: No frames collected.")
-            return ""
-
-        # Concatenate all collected frames
-        full_audio = np.concatenate(self.frames, axis=0)
-
-        # Noise gate: discard recordings that are pure silence/noise.
-        # Whisper hallucinates phrases like "Thank you." from silence.
-        rms = np.sqrt(np.mean(full_audio.astype(np.float32) ** 2))
-        if rms < _MIN_RMS_THRESHOLD:
-            print(f"[STT] Recorder: Audio too quiet (RMS={rms:.1f}) — discarding as silence.")
-            return ""
-
-        # Save to a temporary WAV file
-        temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        temp_path = temp_file.name
-        temp_file.close()
-
-        write(temp_path, self.sample_rate, full_audio)
-        print(f"[STT] Recorder: Saved speech to temp file: {temp_path} ({len(full_audio)} samples, RMS={rms:.1f})")
-        return temp_path
+            return None
+        audio = np.concatenate(frames)
+        print(f"[STT] Recorder: {len(audio) / self.sample_rate:.2f}s recorded.")
+        return audio

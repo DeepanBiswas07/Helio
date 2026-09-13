@@ -5,8 +5,11 @@ Houses the premium HoloOverlay component, handling window flags,
 translucency, hover interactions, mouse dragging, and tap click animations.
 """
 import os
+from collections import deque
+from typing import Optional
+
 from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import Qt, QPoint, QTimer
+from PyQt5.QtCore import Qt, QPoint, QTimer, QObject, pyqtSignal
 
 from orb.config import (WIN_SIZE, WIN_OPACITY_IDLE, WIN_OPACITY_HOVER)
 from orb.state import state as orb_state
@@ -17,8 +20,20 @@ from voice.wakeword_listener import WakeWordListener
 from voice.voice_manager import VoiceManager
 from voice.agent_bridge import AgentBridge
 from voice.tts import HelioTTS
+from services.reminder_service import ReminderService
+from services.schedule_service import ScheduleService
+from services.reflection_service import ReflectionService
 from gesture.thread import GestureThread
+from gesture.desktop_mouse import DesktopHoloOverlay
 from PyQt5.QtGui import QWheelEvent
+import time
+
+
+class _WorkshopCall(QObject):
+    """Carries UI requests from a worker thread to the GUI thread."""
+
+    wanted = pyqtSignal()
+    planet = pyqtSignal(int)
 
 
 class MainWindow(QWidget):
@@ -46,6 +61,21 @@ class MainWindow(QWidget):
         
         # ── Helio Space Overlay ───────────────
         self._space_overlay = HelioSpaceOverlay(self)
+
+        # ── The workshop ──────────────────────
+        # Helio can be told "open the workshop" mid-sentence, and that arrives
+        # on the agent's worker thread. Opening a top-level window there is a
+        # crash, so the tool only ever emits this signal and Qt delivers it
+        # back here on the GUI thread.
+        self._workshop_call = _WorkshopCall()
+        self._workshop_call.wanted.connect(self._open_workshop)
+        self._workshop_call.planet.connect(self._open_planet)
+        try:
+            from tools.system import workshop_tool
+            workshop_tool.ON_WORKSHOP_OPEN = self._workshop_call.wanted.emit
+            workshop_tool.ON_PLANET_OPEN = self._workshop_call.planet.emit
+        except Exception as e:
+            print(f"[Window] workshop hook failed: {e}")
 
         # ── Drag state ────────────────────────
         self._drag_pos = QPoint()
@@ -82,33 +112,142 @@ class MainWindow(QWidget):
         self.tts = HelioTTS(self)
         self.tts.playback_finished.connect(self._on_tts_finished)
 
+        # ── Reminders / timers ─────────────────
+        # Reminders are written to disk by the agent's tools; this service polls
+        # the store on the GUI thread and speaks whatever comes due.
+        self._pending_announcements = deque()
+        self.reminders = ReminderService(self)
+        self.reminders.reminder_due.connect(self._on_reminder_due)
+        self.reminders.start()
+
+        # ── Schedule ───────────────────────────
+        # Leads events rather than firing on them, and opens the day once.
+        # Shares the same announcement queue so a timer and a meeting never
+        # talk over each other.
+        self.schedule = ScheduleService(self)
+        self.schedule.announce.connect(self._on_schedule_announce)
+        self.schedule.start()
+
+        # ── Reflection ─────────────────────────
+        # Mines the behaviour log for patterns on a slow timer, and only while
+        # nothing else is happening. Deliberately silent: what it learns shows
+        # up in MEMORY and answers "what have you learned", rather than
+        # interrupting to announce that it noticed something.
+        self.reflection = ReflectionService(
+            self, is_busy=lambda: orb_state.name in ("listening", "thinking", "speaking"))
+        self.reflection.learned.connect(self._on_learned)
+        self.reflection.suggestion.connect(self._on_pattern_suggestion)
+        self.reflection.start()
+
         self.listener.start()
         
         # ── Gesture Listener ───────────────────
+        self._holo_mouse = DesktopHoloOverlay()
+        self._holo_mouse.hide()
+        self._holo_mouse_active = False
+        self._holo_mouse_lock_t = 0.0
+        self._holo_mouse_lock_dur = 3.0
+
         self.gesture_thread = GestureThread(self)
         self.gesture_thread.gesture_event.connect(self._on_gesture_event)
+        self.gesture_thread.hands_updated.connect(self._on_hands_updated)
         self.gesture_thread.start()
 
-    # ── Gesture Callbacks ───────────────────
+    # ── Gesture & Air Mouse Callbacks ───────────────────
+
+    def toggle_air_mouse(self, force_state: Optional[bool] = None) -> bool:
+        """
+        Toggle or set the Desktop Holographic Air Mouse state.
+        Returns the new active state (True/False).
+        """
+        now = time.time()
+        elapsed = now - self._holo_mouse_lock_t
+        if force_state is None and elapsed < self._holo_mouse_lock_dur:
+            rem = self._holo_mouse_lock_dur - elapsed
+            print(f"[{time.strftime('%H:%M:%S')}] [Air Mouse] Toggle ignored: locked for {rem:.1f}s more to prevent accidental toggle.")
+            return self._holo_mouse_active
+
+        if force_state is not None:
+            self._holo_mouse_active = force_state
+        else:
+            self._holo_mouse_active = not self._holo_mouse_active
+
+        self._holo_mouse_lock_t = now
+        if self._holo_mouse_active:
+            self._holo_mouse.show()
+            self._holo_mouse.raise_()
+            print(f"[{time.strftime('%H:%M:%S')}] [Air Mouse] >> DESKTOP HOLOGRAPHIC AIR MOUSE ACTIVATED! << Gestures paused (clap or type 'airmouse' to close)")
+        else:
+            self._holo_mouse.hide()
+            self._holo_mouse.release_all()
+            print(f"[{time.strftime('%H:%M:%S')}] [Air Mouse] >> DESKTOP HOLOGRAPHIC AIR MOUSE DEACTIVATED! << Gestures back on")
+
+        # The air mouse and the gestures read the same hands, and pinching or
+        # pointing looks like a peace sign or a fist. While the air mouse is
+        # on, only a clap (to turn it off) is listened for.
+        thread = getattr(self, "gesture_thread", None)
+        if thread is not None:
+            thread.set_gestures_enabled(not self._holo_mouse_active)
+
+        return self._holo_mouse_active
+
+    def _on_hands_updated(self, slots):
+        # Always take the newest frame (this also lets the thread send the
+        # next one), so a busy UI skips stale frames instead of replaying them.
+        slots = self.gesture_thread.take_hands()
+        if self._holo_mouse_active:
+            now = time.time()
+            elapsed = now - self._holo_mouse_lock_t
+            is_locked = elapsed < self._holo_mouse_lock_dur
+            rem = max(0.0, self._holo_mouse_lock_dur - elapsed)
+            slot1 = slots[0] if len(slots) > 0 else None
+            slot2 = slots[1] if len(slots) > 1 else None
+            # Inside the workshop both hands get their own pointer.
+            overlay = self._space_overlay
+            workshop = getattr(overlay, "workshop", None)
+            if not (workshop is not None and overlay.isVisible() and workshop.isVisible()):
+                workshop = None
+            self._holo_mouse.update_tracking(slot1, slot2, is_locked, rem, workshop=workshop)
 
     def _on_gesture_event(self, name: str, extra: dict):
         print(f"[Gesture Event] {name} | {extra}")
+        # Gestures are paused while the air mouse is on. This also drops one
+        # that was already queued from just before it switched on.
+        if self._holo_mouse_active and name != "CLAP":
+            return
         
-        if name == "open_or_expand":
-            if not self._space_overlay.isVisible():
-                # 1. Desktop Orb -> Fullscreen Space
-                self._space_overlay.open_space()
-            elif not self._space_overlay.panel_mode:
-                # 2. Fullscreen Space -> Open Panel
-                self._space_overlay.toggle_panel()
+        overlay = self._space_overlay
+        workshop = getattr(overlay, "workshop", None)
+        in_workshop = workshop is not None and workshop.isVisible()
+
+        if name == "CLAP":
+            # Two-hand clap toggles the Desktop Holographic Air Mouse
+            self.toggle_air_mouse()
+
+        elif name == "open_or_expand":
+            if in_workshop:
+                pass                            # already as open as it gets
+            elif not overlay.isVisible():
+                # 1. Desktop orb -> the solar system
+                overlay.open_space()
+            elif not overlay.panel_mode:
+                # 2. Solar system -> the planet's panel
+                overlay.toggle_panel()
+            else:
+                # 3. Panel -> the workshop, full screen
+                overlay.open_workshop()
 
         elif name == "close_or_collapse":
-            if self._space_overlay.panel_mode:
-                # 1. Panel -> Fullscreen Space
-                self._space_overlay.toggle_panel()
-            elif self._space_overlay.isVisible():
-                # 2. Fullscreen Space -> Desktop Orb
-                self._space_overlay.close_space()
+            if in_workshop:
+                # 1. Workshop -> back to the Forge panel it belongs to
+                overlay.close_workshop()
+                self._show_forge_panel()
+            elif overlay.panel_mode:
+                # 2. Panel -> the solar system
+                overlay.toggle_panel()
+            elif overlay.isVisible():
+                # 3. Solar system -> desktop orb
+                overlay.close_space()
 
         elif name == "SWIPE_LEFT":
             if self._space_overlay.isVisible():
@@ -146,6 +285,11 @@ class MainWindow(QWidget):
 
     def _on_wakeword_detected(self, wakeword, score):
         print(f"UI Callback: Wakeword '{wakeword}' triggered UI state change to 'listening' (score: {score:.2f})")
+        # Where in the audio stream the wake word was, so the recording starts
+        # there and not whenever this thread got round to it. Taken once: the
+        # typed 'helio' command has no position and records from now.
+        self._wake_from = getattr(self.listener, "wake_start_sample", None)
+        self.listener.wake_start_sample = None
         self._idle_timer.start(30000)  # 30s max safety timeout
         self.set_ai_state("listening")
 
@@ -156,6 +300,40 @@ class MainWindow(QWidget):
         self._idle_timer.stop()
         print("[VAD] Speech ended — triggering transcription.")
         self.set_ai_state("thinking")
+
+    def _show_forge_panel(self):
+        """Land on the Forge panel after leaving the workshop."""
+        overlay = self._space_overlay
+        try:
+            if overlay.active_planet_index != 7 or not overlay.panel_mode:
+                overlay.trigger_planet(7, auto_open=True)
+        except Exception as e:
+            print(f"[Window] could not open the Forge panel: {e}")
+
+    def _open_planet(self, slot):
+        """Swing the ring to one planet and open it. GUI thread only."""
+        try:
+            if not self._space_overlay.isVisible():
+                self._space_overlay.open_space()
+            self._space_overlay.trigger_planet(int(slot), auto_open=True)
+        except Exception as e:
+            print(f"[Window] could not open planet {slot}: {e}")
+
+    def _open_workshop(self):
+        """
+        Bring the workshop up inside Helio. GUI thread only.
+
+        It used to close the solar system and open a second full-screen
+        window; now it is a panel over the same overlay, so Helio never goes
+        away and there is only one full screen.
+        """
+        try:
+            if not self._space_overlay.isVisible():
+                self._space_overlay.open_space()
+            return self._space_overlay.open_workshop()
+        except Exception as e:
+            print(f"[Window] could not open workshop: {e}")
+            return None
 
     def _on_idle_timeout(self):
         """30-second max-duration safety fallback in case VAD doesn't fire."""
@@ -212,6 +390,8 @@ class MainWindow(QWidget):
             self.listener.stop()
         if hasattr(self, "gesture_thread") and self.gesture_thread:
             self.gesture_thread.stop()
+        if hasattr(self, "_holo_mouse") and self._holo_mouse:
+            self._holo_mouse.close()
         event.accept()
 
     # ── Public API ───────────────────────────
@@ -229,7 +409,8 @@ class MainWindow(QWidget):
 
         # Handle voice recording transitions!
         if state == "listening":
-            self.voice_manager.start_listening()
+            self.voice_manager.start_listening(from_sample=getattr(self, "_wake_from", None))
+            self._wake_from = None
             self._idle_timer.start(30000)  # 30s max safety fallback — VAD handles normal end-of-speech
         elif prev_state == "listening" and state != "listening":
             self.voice_manager.stop_listening_and_transcribe()
@@ -298,6 +479,20 @@ class MainWindow(QWidget):
                 self._space_overlay.chat_widget.add_message("Helio", response.strip(), is_user=False)
                 self._space_overlay.chat_widget.indicator_orb.set_state("speaking")
                 
+            # If a visual artifact was forged or updated, refresh Forge widget and launch live preview
+            if hasattr(self, '_space_overlay') and hasattr(self._space_overlay, 'forge_widget'):
+                self._space_overlay.forge_widget.refresh()
+                resp_lower = response.lower()
+                # The Forge opens itself when a build *starts* (see
+                # helio_space), so by now the user has already watched it
+                # land. Nothing to launch here — a floating window thrown on
+                # top of the panel showing the same page was just noise.
+                if any(kw in resp_lower for kw in
+                       ["forge", "chart", "built", "on the bench",
+                        "forge canvas", "website"]):
+                    if self._space_overlay.isVisible():
+                        self._space_overlay.trigger_planet(7, auto_open=True)
+
             self.set_ai_state("speaking")
             self.tts.speak(response)
         else:
@@ -312,3 +507,62 @@ class MainWindow(QWidget):
         self.set_ai_state("idle")
         if hasattr(self, '_space_overlay') and hasattr(self._space_overlay, 'chat_widget'):
             self._space_overlay.chat_widget.indicator_orb.set_state("idle")
+
+        # A reminder that came due mid-sentence waited for this moment.
+        if self._pending_announcements:
+            QTimer.singleShot(400, self._flush_announcements)
+
+    # ── Reminders ───────────────────────────
+
+    def _on_learned(self, records):
+        """Something was inferred. Noted, not spoken — see ReflectionService."""
+        for record in records:
+            print(f"[Learned] {record.get('fact', '')}")
+
+    def _on_pattern_suggestion(self, suggestion):
+        """
+        A pattern that maps onto a routine worth offering.
+
+        Written into the chat transcript rather than spoken, so it's waiting
+        the next time CHAT is opened instead of interrupting whatever is
+        happening now.
+        """
+        steps = " → ".join(suggestion.get("steps", []))
+        line = ("{} Want me to make that a routine? It would be: {}"
+                .format(suggestion.get("fact", ""), steps))
+        if hasattr(self, "_space_overlay") and hasattr(self._space_overlay, "chat_widget"):
+            self._space_overlay.chat_widget.add_message("Helio", line, is_user=False)
+        print(f"[Learned] Suggestion queued: {line}")
+
+    def _on_schedule_announce(self, message: str):
+        """The schedule speaking on its own. Queued like any other reminder."""
+        self._pending_announcements.append(message)
+        if orb_state.name in ("speaking", "listening", "thinking"):
+            return
+        self._flush_announcements()
+
+    def _on_reminder_due(self, message: str):
+        """A reminder came due. Speak it — but never over Helio's own voice."""
+        self._pending_announcements.append(f"Reminder: {message}")
+
+        # Cutting into a reply, or into the user mid-sentence, is what makes an
+        # alarm clock feel different from an assistant. Wait for a quiet moment.
+        if orb_state.name in ("speaking", "listening", "thinking"):
+            return
+        self._flush_announcements()
+
+    def _flush_announcements(self):
+        if not self._pending_announcements:
+            return
+        if orb_state.name in ("speaking", "listening", "thinking"):
+            return
+
+        line = " Also, ".join(self._pending_announcements)
+        self._pending_announcements.clear()
+
+        if hasattr(self, '_space_overlay') and hasattr(self._space_overlay, 'chat_widget'):
+            self._space_overlay.chat_widget.add_message("Helio", line, is_user=False)
+            self._space_overlay.chat_widget.indicator_orb.set_state("speaking")
+
+        self.set_ai_state("speaking")
+        self.tts.speak(line)

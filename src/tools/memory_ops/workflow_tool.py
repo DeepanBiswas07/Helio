@@ -4,7 +4,51 @@ from memory.semantic_memory import (
     get_workflow,
     list_workflows,
     delete_workflow,
+    touch_workflow,
 )
+
+# A step is a natural-language instruction, so running one means going back
+# through the agent — which can reach run_workflow again. One level deep is
+# enough for any real routine; beyond that it's a loop, not a workflow.
+_RUN_DEPTH = 0
+_MAX_RUN_DEPTH = 1
+
+
+def run_step(step: str) -> str:
+    """
+    Execute a single workflow step and return a one-line transcript of what
+    happened. "open X" goes straight to the launcher — it's the most common
+    step by far and doesn't need a model. Everything else is handed to the
+    agent so steps like "check my CPU" or "search for my resume" actually run.
+    """
+    step = (step or "").strip()
+    if not step:
+        return ""
+
+    if step.lower().startswith("open "):
+        from tools.system.system_control import open_app_smart
+        try:
+            result = open_app_smart(step[5:].strip())
+        except Exception as e:
+            return f"✗ {step} → {e}"
+        return f"✓ {step} → {result}"
+
+    # Imported here, not at module scope: agent imports tool_executor, which
+    # imports this module, so a top-level import would be circular.
+    try:
+        from agent import run_agent
+    except ImportError:
+        return f"• {step} (skipped — agent unavailable)"
+
+    try:
+        result = run_agent(step)
+    except Exception as e:
+        return f"✗ {step} → {e}"
+
+    result = (result or "").strip().replace("\n", " ")
+    if len(result) > 160:
+        result = result[:157] + "..."
+    return f"✓ {step} → {result}" if result else f"✓ {step}"
 
 
 @tool(
@@ -63,8 +107,6 @@ def handle_remember_workflow(action_data):
     required=["name"]
 )
 def handle_run_workflow(action_data):
-    from tools.system.system_control import open_app_smart
-
     name = action_data.get("name", "").strip()
     if not name:
         return "Please specify which workflow to run."
@@ -93,17 +135,17 @@ def handle_run_workflow(action_data):
     if not steps:
         return f"Workflow '{name}' has no steps."
 
-    results = []
-    for step in steps:
-        step_lower = step.lower()
-        # Route the step through the app launcher for "open X" steps
-        if step_lower.startswith("open "):
-            app = step[5:].strip()
-            result = open_app_smart(app)
-            results.append(f"✓ {step} → {result}")
-        else:
-            # For non-app steps, just acknowledge (can be extended)
-            results.append(f"• {step}")
+    global _RUN_DEPTH
+    if _RUN_DEPTH >= _MAX_RUN_DEPTH:
+        return f"Skipped '{name}' — a workflow can't run another workflow."
+
+    _RUN_DEPTH += 1
+    try:
+        results = [run_step(step) for step in steps]
+    finally:
+        _RUN_DEPTH -= 1
+
+    touch_workflow(name)
 
     summary = "\n".join(results)
     purpose_line = f"\nPurpose: {purpose}" if purpose else ""

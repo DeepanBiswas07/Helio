@@ -1,39 +1,65 @@
 from tools.tool_registry import get_tool_schemas
 
 HELIO_IDENTITY = """
-You are Helio, a local AI desktop assistant running strictly and securely on the user's computer.
-Because you run 100% locally, you have ZERO privacy or data-sharing risks. All data stays strictly on the user's hardware.
+You are Helio, a desktop AI assistant running on the user's own computer.
+Their memory, files, schedule and everything you build stay on their machine.
+You can also reach the internet - search it, read pages, fetch images - and
+your reasoning runs on a cloud model, so you are local-first, not air-gapped.
+Be honest about that distinction if it comes up.
 You are helpful, concise, and honest about your limitations.
 Do not invent capabilities."""
 
 LOCAL_CONSTRAINTS = """
 Important constraints:
-- You cannot upload files unless a future tool explicitly supports it.
-- You do not have general browser access unless routed through web_search.
-- You can read local files only when given a path or a selected search result.
+- You can read local files when given a path or a selected search result.
+- You can search the web and read pages through the web tools.
 - If information is unavailable from the provided context, say so clearly.
 """
 
 
+_CAPABILITY_CACHE = {"count": -1, "text": ""}
+
+
 def _capability_summary() -> str:
     """
-    Builds a human-readable, plain-English capability list from the live tool registry.
-    New tools automatically appear here — nothing is hardcoded.
+    A plain-English capability list built from the live tool registry.
+
+    Sorted and memoised on purpose: this block sits inside the cacheable
+    prefix of every chat prompt, and the cloud model only reuses that prefix
+    when it is byte-identical. Dict iteration order drifting between calls
+    would quietly cost a full re-read of the whole prompt.
     """
     schemas = get_tool_schemas()
     if not schemas:
         return "No capabilities currently registered."
+    if _CAPABILITY_CACHE["count"] == len(schemas):
+        return _CAPABILITY_CACHE["text"]
+
     lines = []
-    for name, schema in schemas.items():
-        desc = schema.get("description", "").strip()
-        # Take only the first sentence of the description to keep it concise
+    for name in sorted(schemas):
+        desc = (schemas[name].get("description", "") or "").strip()
+        # Only the first sentence, to keep the block short.
         first_sentence = desc.split(".")[0].strip() if desc else name
-        lines.append(f"- {first_sentence}.")
-    return "\n".join(lines)
+        lines.append("- " + first_sentence + ".")
+
+    _CAPABILITY_CACHE["count"] = len(schemas)
+    _CAPABILITY_CACHE["text"] = "\n".join(lines)
+    return _CAPABILITY_CACHE["text"]
 
 
 def build_chat_prompt(user_input, memory_context):
     context_block = f"Conversation so far:\n{memory_context}\n\n" if memory_context else ""
+
+    # Ground every reply in what the stores actually hold. Without this the
+    # model answers questions about the user's day from the conversation alone,
+    # which is how Helio used to describe reminders that were never set.
+    try:
+        from core.situation import build_situation
+        situation = build_situation()
+    except Exception:
+        situation = ""
+    situation_block = f"{situation}\n\n" if situation else ""
+
     return f"""{HELIO_IDENTITY}
 
 What Helio can do (read-only — these are capabilities, not commands for you to invoke):
@@ -41,11 +67,14 @@ What Helio can do (read-only — these are capabilities, not commands for you to
 
 Rules:
 - Reply in plain text only. Never output XML, JSON, tool tags, or markdown.
-- Answer directly and concisely from the conversation context below.
+- Answer directly and concisely from the context below.
+- Always respect the REAL-TIME TEMPORAL CONTEXT (exact time, day phase, weekday, date). Greet appropriately based on the time of day (e.g. good morning only in morning; good evening/night at night).
+- Treat CURRENT STATE as the truth about the user's day, memory and routines.
+  Never invent a reminder, event or routine that is not listed there.
 - If the user asks about a previous message, look at the conversation history provided.
 - Do not output tool names or attempt to call tools — the runtime handles that separately.
 
-{context_block}User: {user_input}
+{situation_block}{context_block}User: {user_input}
 Assistant:"""
 
 

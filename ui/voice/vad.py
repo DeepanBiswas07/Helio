@@ -47,6 +47,23 @@ class SileroVAD:
         """Reset internal state — call when entering listening mode."""
         self._reset_state()
 
+    @property
+    def speech_active(self):
+        """True once speech has been heard since the last reset."""
+        return self._speech_active
+
+    def arm(self):
+        """
+        Start as if speech were already under way.
+
+        For a command said in the same breath as the wake word: it began
+        before listening did, so a pause now means it has ended, rather than
+        that it has yet to start.
+        """
+        self._speech_active = True
+        self._speech_count = MIN_SPEECH_CHUNKS
+        self._silence_count = 0
+
     def _reset_state(self):
         self._buffer        = np.array([], dtype=np.int16)
         self._speech_active = False   # True once first speech chunk detected

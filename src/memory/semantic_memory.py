@@ -1,4 +1,6 @@
 import json
+import time
+import uuid
 from pathlib import Path
 from typing import Optional
 from rapidfuzz import process, fuzz
@@ -99,66 +101,109 @@ def _find_duplicate(fact: str, entries: list):
     return -1
 
 
-def save_memory(fact: str, category: str = None):
+def save_memory(fact: str, category: str = None, use_model: bool = True):
     """
-    Save a fact to the appropriate memory category.
-    If a fuzzy-similar fact already exists it is replaced (updated) rather
-    than duplicated. If category is not given it is auto-classified.
+    Save a fact, retiring whatever it makes untrue.
+
+    Storage moved to memory_facts, which keeps records rather than strings so a
+    fact can carry an expiry and a history. The old fuzzy duplicate check only
+    caught restatements that shared most of their words; "my internship ended"
+    shares almost nothing with "my internship runs until 10 June", so both used
+    to survive and Helio believed two contradictory things.
+
+    Returns (record, replaced) for callers that want to report the change.
     """
     if not fact or not isinstance(fact, str):
-        return
+        return None, []
+
+    from memory import memory_facts
 
     category = category if category in CATEGORIES else classify_category(fact)
-    entries = _load_category(category)
+    return memory_facts.remember(fact, category, use_model=use_model)
 
-    # Exact match — already stored, nothing to do
-    if fact in entries:
-        return
 
-    # Fuzzy match — update existing entry instead of appending
-    dup_idx = _find_duplicate(fact, entries)
-    if dup_idx >= 0:
-        entries[dup_idx] = fact
-    else:
-        entries.append(fact)
+def save_memory_text(fact: str, category: str = None):
+    """Old signature, for callers that only care that it was stored."""
+    save_memory(fact, category)
 
-    _save_category(category, entries)
+
+def get_memory_records(category: str = None) -> list:
+    """Full records — text plus expiry, history and status."""
+    from memory import memory_facts
+
+    if category:
+        return memory_facts.active(category)
+    out = []
+    for cat in CATEGORIES:
+        out.extend(memory_facts.active(cat))
+    return out
+
+
+def forget_memory(needle: str, category: str = None):
+    """Delete a stored fact. Returns the records removed."""
+    from memory import memory_facts
+
+    categories = [category] if category in CATEGORIES else list(CATEGORIES)
+    removed = []
+    for cat in categories:
+        removed.extend(memory_facts.forget(cat, needle))
+    return removed
+
+
+def sweep_expired_memories():
+    """Retire facts whose stated end date has passed. Returns what changed."""
+    from memory import memory_facts
+
+    changed = []
+    for cat in CATEGORIES:
+        changed.extend(memory_facts.sweep_expired(cat))
+    return changed
+
+
+def memory_history(needle: str = "", category: str = None) -> list:
+    """What a fact used to say, and when it changed."""
+    from memory import memory_facts
+
+    categories = [category] if category in CATEGORIES else list(CATEGORIES)
+    out = []
+    for cat in categories:
+        out.extend(memory_facts.history_of(cat, needle))
+    return out
 
 
 def get_memories(category: str = None) -> list:
     """
-    Return all memories for a specific category, or ALL memories flattened
-    if category is None.
+    Active memories as plain strings — the shape every existing caller expects.
+
+    Superseded and expired records are filtered out here, which is the whole
+    point: a fact that stopped being true should not reach a prompt.
     """
-    if category:
-        return _load_category(category)
-
-    all_memories = []
-    for cat in CATEGORIES:
-        all_memories.extend(_load_category(cat))
-    return all_memories
+    return [r["text"] for r in get_memory_records(category)]
 
 
-def retrieve_memories(query: str = None, top_k: int = 30, category: str = None) -> list:
+def retrieve_memories(query: str = None, top_k: int = 8, category: str = None) -> list:
     """
-    Retrieve the most relevant memories for a query.
-    Searches a specific category or all categories if none given.
+    The memories relevant to a question, best first.
+
+    This used to return *everything* whenever the store held fewer than top_k
+    entries, which is not retrieval — it's a dump, and it pushes the actual
+    question further from the model's attention. It now ranks semantically, so
+    "what do I do for work" reaches "the user is interning at Acme" without
+    sharing a single word with it.
     """
-    memories = get_memories(category)
-    if not memories:
-        return []
+    from memory import memory_facts
 
-    if len(memories) <= top_k:
-        return memories
+    categories = [category] if category in CATEGORIES else list(CATEGORIES)
+    hits = []
+    for cat in categories:
+        hits.extend(memory_facts.recall(query, cat, top_k=top_k))
 
-    # Fuzzy fallback for large stores
-    results = process.extract(
-        query or "",
-        memories,
-        scorer=fuzz.token_set_ratio,
-        limit=top_k,
-    )
-    return [match for match, score, _ in results if score >= 20]
+    if not query:
+        return [r["text"] for r in hits][:top_k]
+
+    scores = memory_facts._similarities(query, hits) if hits else []
+    ranked = sorted(zip(scores, hits), key=lambda pair: pair[0], reverse=True)
+    return [record["text"] for _score, record in ranked][:top_k]
 
 
 # ── Conversation Memory ───────────────────────────────────────────────────────
@@ -376,15 +421,36 @@ def save_workflow(name: str, steps: list, purpose: str = ""):
     Save or overwrite a named workflow.
     steps: list of action strings e.g. ["open vscode", "open terminal"]
     purpose: optional description of why this workflow exists
+
+    Run history (created / last_run / run_count) is preserved across edits.
     """
     if not name or not steps:
         return
 
     workflows = _load_workflows()
-    workflows[name.lower().strip()] = {
+    key = name.lower().strip()
+    existing = workflows.get(key) or {}
+
+    workflows[key] = {
         "steps": [s.strip() for s in steps if isinstance(s, str) and s.strip()],
         "purpose": purpose.strip(),
+        "created": existing.get("created") or time.time(),
+        "last_run": existing.get("last_run"),
+        "run_count": existing.get("run_count", 0),
     }
+    _save_workflows(workflows)
+
+
+def touch_workflow(name: str):
+    """Record that a workflow just ran. Safe on workflows saved before metadata existed."""
+    workflows = _load_workflows()
+    key = name.lower().strip()
+    entry = workflows.get(key)
+    if not entry:
+        return
+
+    entry["last_run"] = time.time()
+    entry["run_count"] = entry.get("run_count", 0) + 1
     _save_workflows(workflows)
 
 
@@ -441,3 +507,92 @@ def migrate_legacy(legacy_path: Path = None):
 
 # Run migration on first import so nothing is ever lost
 migrate_legacy()
+
+
+# ── Reminders ─────────────────────────────────────────────────────────────────
+# Reminders are stored as a list in data/memory/reminders.json:
+# [
+#   {
+#     "id": "3f2a1c",
+#     "message": "check the oven",
+#     "due_ts": 1770000000.0,
+#     "created_ts": 1769999000.0
+#   }
+# ]
+# They live on disk rather than in memory so a pending reminder survives a
+# restart — the UI's ReminderService re-reads this file on every tick.
+
+_REMINDERS_PATH = DATA_DIR / "reminders.json"
+
+
+def _load_reminders() -> list:
+    _ensure_data_dir()
+    if not _REMINDERS_PATH.exists():
+        return []
+    try:
+        with _REMINDERS_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_reminders(reminders: list):
+    _ensure_data_dir()
+    try:
+        with _REMINDERS_PATH.open("w", encoding="utf-8") as f:
+            json.dump(reminders, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def add_reminder(message: str, due_ts: float) -> dict:
+    """Store a reminder due at an absolute epoch timestamp. Returns the record."""
+    record = {
+        "id": uuid.uuid4().hex[:6],
+        "message": (message or "").strip(),
+        "due_ts": float(due_ts),
+        "created_ts": time.time(),
+    }
+    reminders = _load_reminders()
+    reminders.append(record)
+    reminders.sort(key=lambda r: r.get("due_ts", 0))
+    _save_reminders(reminders)
+    return record
+
+
+def list_reminders() -> list:
+    """All pending reminders, soonest first."""
+    return sorted(_load_reminders(), key=lambda r: r.get("due_ts", 0))
+
+
+def remove_reminder(reminder_id: str) -> bool:
+    """Delete one reminder by id. Returns True if it existed."""
+    reminders = _load_reminders()
+    remaining = [r for r in reminders if r.get("id") != reminder_id]
+    if len(remaining) == len(reminders):
+        return False
+    _save_reminders(remaining)
+    return True
+
+
+def pop_due_reminders(now: Optional[float] = None) -> list:
+    """
+    Return every reminder due at or before `now` and remove them from the store
+    in one pass, so a reminder can never fire twice even if two ticks overlap.
+    """
+    now = time.time() if now is None else now
+    reminders = _load_reminders()
+    due = [r for r in reminders if r.get("due_ts", 0) <= now]
+    if due:
+        pending = [r for r in reminders if r.get("due_ts", 0) > now]
+        _save_reminders(pending)
+    return due
+
+
+def reminders_mtime() -> float:
+    """Modification time of the reminder store, or 0 if it doesn't exist yet."""
+    try:
+        return _REMINDERS_PATH.stat().st_mtime
+    except OSError:
+        return 0.0

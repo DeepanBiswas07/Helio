@@ -12,6 +12,7 @@ from PyQt5.QtGui import (
     QColor, QFont, QPainter, QPen, QBrush, QRadialGradient,
     QLinearGradient, QPainterPath, QFontMetrics
 )
+from . import workshop_style as W
 from .base import BasePanel, _content_alpha, _draw_header
 
 # ── memory backend (lazy import so ui still loads if src is missing) ──────────
@@ -213,6 +214,9 @@ class _NeuralOrb(QWidget):
         t = QTimer(self); t.timeout.connect(self._tick); t.start(16)
 
     def _tick(self):
+        # Nothing to animate while the memory panel is closed.
+        if not self.isVisible():
+            return
         self._phase += 0.04
         for i, r in enumerate(self._rings):
             self._ring_angles[i] = (self._ring_angles[i] + r["spd"]) % 360
@@ -293,27 +297,33 @@ class _StatCard(QFrame):
         self._color = color
         self._selected = False
         self.setCursor(Qt.PointingHandCursor)
+        # A cell on an instrument, framed by one lit edge — not a tile.
         self._base_style = f"""
             QFrame {{
-                background: rgba(20,8,40,180);
-                border: 1px solid {color}44;
-                border-radius: 10px;
+                background: transparent;
+                border: none;
+                border-bottom: 1px solid {W.MEMORY.RULE};
+                border-left: 2px solid transparent;
             }}
+            QFrame:hover {{ border-left: 2px solid {color}; }}
         """
         self._sel_style = f"""
             QFrame {{
-                background: {color}22;
-                border: 2px solid {color};
-                border-radius: 10px;
+                background: rgba(180, 50, 255, 22);
+                border: none;
+                border-bottom: 1px solid {color};
+                border-left: 2px solid {color};
             }}
         """
         self.setStyleSheet(self._base_style)
         lay = QVBoxLayout(self); lay.setContentsMargins(10,8,10,8); lay.setSpacing(2)
         self.val_lbl = QLabel(str(value))
-        self.val_lbl.setStyleSheet(f"color:{color}; font:bold 18px 'Segoe UI'; background:transparent; border:none;")
+        self.val_lbl.setFont(W.mono_font(15, bold=True))
+        self.val_lbl.setStyleSheet(f"color:{color};background:transparent;border:none;")
         self.val_lbl.setAlignment(Qt.AlignCenter)
         cat_lbl = QLabel(label.title())
-        cat_lbl.setStyleSheet("color:#8860bb; font:9px 'Segoe UI'; background:transparent; border:none;")
+        cat_lbl.setFont(W.label_font(8, tracking=2.0))
+        cat_lbl.setStyleSheet(f"color:{W.MEMORY.DIM};background:transparent;border:none;")
         cat_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.val_lbl); lay.addWidget(cat_lbl)
 
@@ -339,25 +349,25 @@ class _MemItem(QFrame):
     def __init__(self, text, category, dot_color="#b432ff", parent=None):
         super().__init__(parent)
         self._text = text; self._cat = category
-        self.setStyleSheet("QFrame{background:rgba(18,8,35,160);border:1px solid #2a1050;border-radius:8px;}")
+        self.setStyleSheet(W.MEMORY.ROW)
         lay = QHBoxLayout(self); lay.setContentsMargins(10,6,8,6); lay.setSpacing(8)
 
         dot = QLabel("●")
-        dot.setStyleSheet(f"color:{dot_color};font-size:8px;background:transparent;border:none;")
+        dot.setStyleSheet(f"color:{dot_color};font-size:9px;background:transparent;border:none;")
         lay.addWidget(dot)
 
         txt = QLabel(text)
         txt.setWordWrap(True)
-        txt.setStyleSheet("color:#c8a8f0;font:11px 'Segoe UI';background:transparent;border:none;")
+        txt.setStyleSheet("color:#e8dcff;font:12px 'Consolas';background:transparent;border:none;")
         lay.addWidget(txt, 1)
 
         cat_tag = QLabel(category)
-        cat_tag.setStyleSheet(f"color:{dot_color}88;font:8px 'Segoe UI';background:transparent;border:none;")
+        cat_tag.setStyleSheet(f"color:{dot_color};font:9px 'Consolas';background:transparent;border:none;")
         lay.addWidget(cat_tag)
 
         del_btn = QPushButton("✕")
         del_btn.setFixedSize(18,18)
-        del_btn.setStyleSheet("QPushButton{background:transparent;color:#553366;border:none;font-size:10px;}"
+        del_btn.setStyleSheet("QPushButton{background:transparent;color:#8a6bb0;border:none;font-size:12px;}"
                               "QPushButton:hover{color:#ff6688;}")
         del_btn.clicked.connect(lambda: self.delete_requested.emit(self._text, self._cat))
         lay.addWidget(del_btn)
@@ -369,11 +379,7 @@ class _MemItem(QFrame):
 class _RecentItem(QFrame):
     def __init__(self, title, snippet, time_str, icon="💬", parent=None):
         super().__init__(parent)
-        self.setStyleSheet("""
-            QFrame{background:rgba(18,8,38,170);border:1px solid #2a1050;
-                   border-radius:8px;}
-            QFrame:hover{border-color:#6a30c0;background:rgba(30,12,55,200);}
-        """)
+        self.setStyleSheet(W.MEMORY.ROW)
         lay = QVBoxLayout(self); lay.setContentsMargins(10,7,10,7); lay.setSpacing(2)
 
         top = QHBoxLayout(); top.setSpacing(6)
@@ -381,16 +387,16 @@ class _RecentItem(QFrame):
         icon_lbl.setStyleSheet("background:transparent;border:none;font-size:13px;")
         top.addWidget(icon_lbl)
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color:#d8b8ff;font:bold 10px 'Segoe UI';background:transparent;border:none;")
+        title_lbl.setStyleSheet("color:#eddcff;font:bold 11px 'Consolas';background:transparent;border:none;")
         top.addWidget(title_lbl, 1)
         time_lbl = QLabel(time_str)
-        time_lbl.setStyleSheet("color:#604880;font:8px 'Segoe UI';background:transparent;border:none;")
+        time_lbl.setStyleSheet("color:#9678b8;font:9px 'Consolas';background:transparent;border:none;")
         top.addWidget(time_lbl)
         lay.addLayout(top)
 
         snip_lbl = QLabel(snippet)
         snip_lbl.setWordWrap(True)
-        snip_lbl.setStyleSheet("color:#8860a8;font:9px 'Segoe UI';background:transparent;border:none;")
+        snip_lbl.setStyleSheet("color:#b294d0;font:10px 'Consolas';background:transparent;border:none;")
         lay.addWidget(snip_lbl)
 
 
@@ -424,19 +430,15 @@ class MemoryWidget(QWidget):
         self._search_box = QLineEdit()
         self._search_box.setPlaceholderText("🔍  Search memories…")
         self._search_box.setFixedHeight(30)
-        self._search_box.setStyleSheet("""
-            QLineEdit{background:rgba(20,8,40,200);border:1px solid #5a2090;border-radius:14px;
-                      color:#ddc8ff;font:11px 'Segoe UI';padding:0 12px;}
-            QLineEdit:focus{border-color:#b432ff;}
-        """)
+        self._search_box.setFont(W.mono_font(10))
+        self._search_box.setStyleSheet(W.MEMORY.INPUT)
         self._search_box.textChanged.connect(self._on_search)
         hdr.addWidget(self._search_box)
 
         ref_btn = QPushButton("↻")
         ref_btn.setFixedSize(30,30)
-        ref_btn.setStyleSheet("QPushButton{background:rgba(80,20,140,160);border:1px solid #5a2090;"
-                              "border-radius:14px;color:#cc80ff;font:14px 'Segoe UI';}"
-                              "QPushButton:hover{background:rgba(130,40,200,180);}")
+        ref_btn.setFont(W.mono_font(11))
+        ref_btn.setStyleSheet(W.MEMORY.CHIP)
         ref_btn.clicked.connect(self._refresh)
         hdr.addWidget(ref_btn)
         root.addLayout(hdr)
@@ -462,17 +464,14 @@ class MemoryWidget(QWidget):
         # LEFT: recent activity column
         recent_col = QVBoxLayout(); recent_col.setSpacing(5)
         rec_hdr = QLabel("RECENT ACTIVITY")
-        rec_hdr.setStyleSheet("color:#9060c0;font:bold 9px 'Segoe UI';background:transparent;letter-spacing:1px;")
+        rec_hdr.setStyleSheet("color:#c9a3f0;font:bold 10px 'Consolas';background:transparent;letter-spacing:1px;")
         recent_col.addWidget(rec_hdr)
 
         self._recent_scroll = QScrollArea()
         self._recent_scroll.setWidgetResizable(True)
-        self._recent_scroll.setFixedWidth(190)
-        self._recent_scroll.setStyleSheet("""
-            QScrollArea{background:transparent;border:none;}
-            QScrollBar:vertical{background:transparent;width:4px;}
-            QScrollBar::handle:vertical{background:rgba(140,40,220,80);border-radius:2px;}
-        """)
+        self._recent_scroll.setFixedWidth(215)
+        self._recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._recent_scroll.setStyleSheet(W.MEMORY.SCROLL)
         self._recent_container = QWidget()
         self._recent_container.setAttribute(Qt.WA_TranslucentBackground)
         self._recent_layout = QVBoxLayout(self._recent_container)
@@ -489,7 +488,7 @@ class MemoryWidget(QWidget):
         orb_col.addWidget(self._orb)
         self._orb_label = QLabel("Neural Core")
         self._orb_label.setAlignment(Qt.AlignCenter)
-        self._orb_label.setStyleSheet("color:#7a40a0;font:9px 'Segoe UI';background:transparent;")
+        self._orb_label.setStyleSheet("color:#a878d0;font:10px 'Consolas';background:transparent;")
         orb_col.addWidget(self._orb_label)
         mid.addLayout(orb_col)
 
@@ -498,18 +497,15 @@ class MemoryWidget(QWidget):
 
         cat_hdr_row = QHBoxLayout()
         cat_lbl = QLabel("Memory Entries")
-        cat_lbl.setStyleSheet("color:#9060c0;font:bold 10px 'Segoe UI';background:transparent;")
+        cat_lbl.setStyleSheet("color:#c9a3f0;font:bold 11px 'Consolas';background:transparent;")
         cat_hdr_row.addWidget(cat_lbl)
         cat_hdr_row.addStretch()
         list_col.addLayout(cat_hdr_row)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setStyleSheet("""
-            QScrollArea{background:transparent;border:none;}
-            QScrollBar:vertical{background:transparent;width:5px;}
-            QScrollBar::handle:vertical{background:rgba(140,40,220,100);border-radius:2px;}
-        """)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet(W.MEMORY.SCROLL)
         self._list_container = QWidget()
         self._list_container.setAttribute(Qt.WA_TranslucentBackground)
         self._list_layout = QVBoxLayout(self._list_container)
@@ -526,23 +522,15 @@ class MemoryWidget(QWidget):
         self._add_edit = QLineEdit()
         self._add_edit.setPlaceholderText("Type a new memory and press ＋  (e.g. I prefer dark mode)")
         self._add_edit.setFixedHeight(34)
-        self._add_edit.setStyleSheet("""
-            QLineEdit{background:rgba(15,5,30,220);border:1px solid #4a1880;border-radius:16px;
-                      color:#ddc8ff;font:11px 'Segoe UI';padding:0 14px;}
-            QLineEdit:focus{border-color:#b432ff;}
-        """)
+        self._add_edit.setFont(W.mono_font(10))
+        self._add_edit.setStyleSheet(W.MEMORY.INPUT)
         self._add_edit.returnPressed.connect(self._add_memory)
         add_row.addWidget(self._add_edit, 1)
 
         self._add_btn = QPushButton("＋")
         self._add_btn.setFixedSize(34,34)
-        self._add_btn.setStyleSheet("""
-            QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,
-                stop:0 #7a10d0,stop:1 #b432ff);border:none;border-radius:16px;
-                color:white;font:16px 'Segoe UI';}
-            QPushButton:hover{background:#c844ff;}
-            QPushButton:disabled{background:rgba(60,20,100,120);color:#555;}
-        """)
+        self._add_btn.setFont(W.mono_font(12))
+        self._add_btn.setStyleSheet(W.MEMORY.COMMAND)
         self._add_btn.clicked.connect(self._add_memory)
         add_row.addWidget(self._add_btn)
         root.addLayout(add_row)
@@ -550,7 +538,7 @@ class MemoryWidget(QWidget):
         # status label shown during AI processing
         self._status_lbl = QLabel("")
         self._status_lbl.setAlignment(Qt.AlignCenter)
-        self._status_lbl.setStyleSheet("color:#9060c0;font:italic 9px 'Segoe UI';background:transparent;")
+        self._status_lbl.setStyleSheet("color:#c9a3f0;font:italic 10px 'Consolas';background:transparent;")
         self._status_lbl.hide()
         root.addWidget(self._status_lbl)
 
@@ -755,13 +743,5 @@ class MemoryWidget(QWidget):
         self._rebuild_list()
 
     def paintEvent(self, event):
-        """Draw the dark glass background for the whole widget."""
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        r = self.rect().adjusted(1,1,-1,-1)
-        grad = QLinearGradient(r.topLeft(), r.bottomRight())
-        grad.setColorAt(0.0, QColor(8, 2, 20, 230))
-        grad.setColorAt(1.0, QColor(14, 5, 32, 220))
-        p.setBrush(grad)
-        p.setPen(QPen(QColor(100, 30, 180, 60), 1.2))
-        p.drawRoundedRect(r, 16, 16)
+        """The workshop frame: flat ground, scanlines, hairline edge, brackets."""
+        W.MEMORY.frame(self)

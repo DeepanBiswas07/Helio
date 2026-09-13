@@ -329,6 +329,47 @@ class GenericPlanet(BasePlanet):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# RESERVED PLANET — muted slot for a not-yet-built feature. Reuses GenericPlanet's
+# sphere/idle/hover rendering as-is; only the color and label are different, so a
+# reserved slot reads as "intentionally quiet," not "broken."
+# ─────────────────────────────────────────────────────────────────────────────
+class ReservedPlanet(GenericPlanet):
+    def __init__(self, slot_number: int):
+        super().__init__(
+            f"RESERVED · {slot_number:02d}",
+            QColor(178, 148, 108),
+            "Reserved for a future capability"
+        )
+
+    def _draw_idle(self, painter, cx, cy, w, r_base, alpha, inner_opacity, phase):
+        """
+        A deliberately quieter idle than an active planet: one slow sonar ring
+        and a soft bloom, no scanner sweep or node crown. Reads as dormant
+        rather than busy — and costs ~4 draws a frame instead of ~24.
+        """
+        a_mul = alpha / 255.0
+        opa = inner_opacity * a_mul
+        cr, cg, cb = self.color.red(), self.color.green(), self.color.blue()
+
+        t = (phase * 0.010) % 1.0
+        ring_r = r_base * (0.9 + t * 0.9)
+        ring_a = int(90 * (1.0 - t) * opa)
+        if ring_a > 0:
+            pen = QPen(QColor(cr, cg, cb, ring_a))
+            pen.setWidthF(1.0)
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(pen)
+            painter.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
+
+        boost = QRadialGradient(cx, cy, r_base * 0.55)
+        boost.setColorAt(0.0, QColor(255, 255, 255, int(30 * opa)))
+        boost.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setBrush(boost)
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QPointF(cx, cy), r_base * 0.55, r_base * 0.55)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CHAT PLANET  — holographic blue orb with extra rings, particles, flares
 # ─────────────────────────────────────────────────────────────────────────────
 _CHAT_RINGS = [
@@ -405,10 +446,11 @@ class ChatPlanet(BasePlanet):
         # Plasma core
         r_core = r_base*(0.88+pulse*0.04)
         core = QRadialGradient(cx,cy,r_core)
-        core.setColorAt(0.00, QColor(200,240,255,int(240*inner_opacity*a_mul)))
-        core.setColorAt(0.18, QColor(80, 210,255,int(220*inner_opacity*a_mul)))
-        core.setColorAt(0.45, QColor(0,  160,255,int(160*inner_opacity*a_mul)))
-        core.setColorAt(0.75, QColor(0,   80,200,int( 70*inner_opacity*a_mul)))
+        core.setColorAt(0.00, QColor(255,255,255,int(250*inner_opacity*a_mul)))
+        core.setColorAt(0.12, QColor(210,245,255,int(240*inner_opacity*a_mul)))
+        core.setColorAt(0.32, QColor(70, 205,255,int(215*inner_opacity*a_mul)))
+        core.setColorAt(0.58, QColor(0,  150,255,int(165*inner_opacity*a_mul)))
+        core.setColorAt(0.82, QColor(0,   60,170,int( 75*inner_opacity*a_mul)))
         core.setColorAt(1.00, QColor(0,0,0,0))
         painter.setBrush(core); painter.drawEllipse(QPointF(cx,cy),r_core,r_core)
 
@@ -575,10 +617,11 @@ class MemoryPlanet(BasePlanet):
         # Plasma core
         r_core = r_base*(0.88+pulse*0.04)
         core = QRadialGradient(cx,cy,r_core)
-        core.setColorAt(0.00, QColor(230,180,255,int(240*inner_opacity*a_mul)))
-        core.setColorAt(0.18, QColor(180,80,255,int(220*inner_opacity*a_mul)))
-        core.setColorAt(0.45, QColor(130,50,255,int(160*inner_opacity*a_mul)))
-        core.setColorAt(0.75, QColor(80,10,200,int(70*inner_opacity*a_mul)))
+        core.setColorAt(0.00, QColor(255,255,255,int(250*inner_opacity*a_mul)))
+        core.setColorAt(0.12, QColor(240,215,255,int(240*inner_opacity*a_mul)))
+        core.setColorAt(0.32, QColor(190,90, 255,int(215*inner_opacity*a_mul)))
+        core.setColorAt(0.58, QColor(130,50, 255,int(165*inner_opacity*a_mul)))
+        core.setColorAt(0.82, QColor(70,10,  170,int( 75*inner_opacity*a_mul)))
         core.setColorAt(1.00, QColor(0,0,0,0))
         painter.setBrush(core); painter.drawEllipse(QPointF(cx,cy),r_core,r_core)
 
@@ -753,10 +796,11 @@ class FilesPlanet(BasePlanet):
         # Plasma core
         r_core = r_base*(0.88+pulse*0.04)
         core = QRadialGradient(cx,cy,r_core)
-        core.setColorAt(0.00, QColor(200,255,235,int(240*inner_opacity*a_mul)))
-        core.setColorAt(0.18, QColor(0,220,170,int(220*inner_opacity*a_mul)))
-        core.setColorAt(0.45, QColor(0,160,130,int(160*inner_opacity*a_mul)))
-        core.setColorAt(0.75, QColor(0,90,70,int(70*inner_opacity*a_mul)))
+        core.setColorAt(0.00, QColor(255,255,255,int(250*inner_opacity*a_mul)))
+        core.setColorAt(0.12, QColor(220,255,245,int(240*inner_opacity*a_mul)))
+        core.setColorAt(0.32, QColor(0,  230,180,int(215*inner_opacity*a_mul)))
+        core.setColorAt(0.58, QColor(0,  160,130,int(165*inner_opacity*a_mul)))
+        core.setColorAt(0.82, QColor(0,  75,  60,int( 75*inner_opacity*a_mul)))
         core.setColorAt(1.00, QColor(0,0,0,0))
         painter.setBrush(core); painter.drawEllipse(QPointF(cx,cy),r_core,r_core)
 
@@ -926,10 +970,11 @@ class SystemPlanet(BasePlanet):
         # Plasma core
         r_core = r_base*(0.88+pulse*0.04)
         core = QRadialGradient(cx,cy,r_core)
-        core.setColorAt(0.00, QColor(255,200,150,int(240*inner_opacity*a_mul)))
-        core.setColorAt(0.18, QColor(255,100,0,int(220*inner_opacity*a_mul)))
-        core.setColorAt(0.45, QColor(220,50,0,int(160*inner_opacity*a_mul)))
-        core.setColorAt(0.75, QColor(140,10,0,int(70*inner_opacity*a_mul)))
+        core.setColorAt(0.00, QColor(255,255,255,int(250*inner_opacity*a_mul)))
+        core.setColorAt(0.12, QColor(255,225,190,int(240*inner_opacity*a_mul)))
+        core.setColorAt(0.32, QColor(255,110,0,  int(215*inner_opacity*a_mul)))
+        core.setColorAt(0.58, QColor(220,50, 0,  int(165*inner_opacity*a_mul)))
+        core.setColorAt(0.82, QColor(120,10, 0,  int( 75*inner_opacity*a_mul)))
         core.setColorAt(1.00, QColor(0,0,0,0))
         painter.setBrush(core); painter.drawEllipse(QPointF(cx,cy),r_core,r_core)
 
@@ -1021,15 +1066,437 @@ class SystemPlanet(BasePlanet):
 # ─────────────────────────────────────────────────────────────────────────────
 # REGISTRY
 # ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# SETUP PLANET - lime orb whose motif is a repeating cycle, not a sphere with
+# rings. Step-nodes sit on one orbit and illuminate in sequence, so the planet
+# reads as a sequence that runs, which is what a routine is.
+# ---------------------------------------------------------------------------
+_ROUTINE_STEPS = 6
+
+class SetupPlanet(BasePlanet):
+    def __init__(self):
+        super().__init__("SETUP", QColor(150,225,70),
+                         "Your workshop - build it once, run it by name")
+        self._orbit = 0.0
+        self._head = 0.0          # which step-node is lit, fractional
+        rng = random.Random(77)
+        self._motes = [
+            {"angle":rng.uniform(0,360),"dfrac":rng.uniform(0.40,0.70),
+             "speed":rng.uniform(0.15,0.45)*rng.choice([-1,1]),
+             "size":rng.uniform(0.8,1.8),"alpha":rng.randint(40,150),
+             "adir":rng.choice([-1,1])*rng.uniform(1.4,3.0)}
+            for _ in range(10)]
+
+    def _tick(self):
+        super()._tick()
+        self._orbit = (self._orbit + 0.30) % 360
+        # The lit node advances one step at a time, pausing on each - a routine
+        # executes discretely, so a smooth sweep would be the wrong verb.
+        self._head = (self._head + 0.022) % _ROUTINE_STEPS
+        for m in self._motes:
+            m["angle"] = (m["angle"] + m["speed"]) % 360
+            m["alpha"] += m["adir"]
+            if m["alpha"] > 165: m["alpha"], m["adir"] = 165, -abs(m["adir"])
+            elif m["alpha"] < 30: m["alpha"], m["adir"] = 30, abs(m["adir"])
+
+    def draw(self, painter, i, cx, cy, w, h, rad, alpha, is_hovered,
+             inner_opacity, panel_progress, is_active, phase, hover_prog=None):
+        self._maybe_tick(phase)
+        a_mul  = alpha/255.0
+        r_base = w*0.42
+        pulse  = math.sin(phase*0.045)
+        if hover_prog is None:
+            hover_prog = max(0.0, min(1.0, (w/90.0-1.0)/0.2))
+
+        painter.save()
+        painter.setRenderHint(painter.Antialiasing)
+
+        if inner_opacity > 0.02:
+            self._draw_idle(painter, cx, cy, w, r_base, alpha, inner_opacity, phase)
+
+        # Outer lime fog
+        r_fog = r_base*1.52 + pulse*2.0
+        fog = QRadialGradient(cx,cy,r_fog)
+        fog.setColorAt(0.0, QColor(150,225,70,int(52*inner_opacity*a_mul)))
+        fog.setColorAt(0.5, QColor(100,165,40,int(26*inner_opacity*a_mul)))
+        fog.setColorAt(1.0, QColor(0,0,0,0))
+        painter.setPen(Qt.NoPen); painter.setBrush(fog)
+        painter.drawEllipse(QPointF(cx,cy), r_fog, r_fog)
+
+        # Core
+        r_core = r_base*(0.86+pulse*0.04)
+        core = QRadialGradient(cx,cy,r_core)
+        core.setColorAt(0.00, QColor(255,255,255,int(250*inner_opacity*a_mul)))
+        core.setColorAt(0.13, QColor(238,255,210,int(238*inner_opacity*a_mul)))
+        core.setColorAt(0.34, QColor(170,235,90, int(212*inner_opacity*a_mul)))
+        core.setColorAt(0.60, QColor(100,165,40, int(160*inner_opacity*a_mul)))
+        core.setColorAt(0.84, QColor(40, 70, 15, int( 72*inner_opacity*a_mul)))
+        core.setColorAt(1.00, QColor(0,0,0,0))
+        painter.setBrush(core); painter.drawEllipse(QPointF(cx,cy),r_core,r_core)
+
+        # The cycle: one continuous track with discrete step-nodes on it.
+        if inner_opacity > 0.02:
+            rr = w*0.66/2
+            rect = QRectF(cx-rr, cy-rr, rr*2, rr*2)
+
+            track = QPen(QColor(150,225,70,int(70*inner_opacity*a_mul)))
+            track.setWidthF(0.9)
+            painter.setPen(track); painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(rect)
+
+            lit = int(self._head)
+            for s in range(_ROUTINE_STEPS):
+                ang = math.radians(self._orbit + s*(360.0/_ROUTINE_STEPS) - 90)
+                px = cx + rr*math.cos(ang)
+                py = cy + rr*math.sin(ang)
+                is_lit = (s == lit)
+                na = int((215 if is_lit else 85)*inner_opacity*a_mul)
+                size = 2.6 if is_lit else 1.5
+
+                if is_lit:
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor(150,225,70,int(na*0.32)))
+                    painter.drawEllipse(QPointF(px,py), size*3.0, size*3.0)
+
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(235,255,200,na) if is_lit
+                                 else QColor(150,225,70,na))
+                painter.drawEllipse(QPointF(px,py), size, size)
+
+            # The connector between the step just done and the one running -
+            # the visual that says "this is a sequence in progress".
+            a0 = self._orbit + lit*(360.0/_ROUTINE_STEPS) - 90
+            arcpen = QPen(QColor(200,255,150,int(190*inner_opacity*a_mul)))
+            arcpen.setWidthF(1.6); arcpen.setCapStyle(Qt.RoundCap)
+            painter.setPen(arcpen); painter.setBrush(Qt.NoBrush)
+            painter.drawArc(rect, int(-a0*16), int(-(360.0/_ROUTINE_STEPS)*16))
+
+        # Ambient motes
+        if inner_opacity > 0.02:
+            painter.setPen(Qt.NoPen)
+            for m in self._motes:
+                rp = math.radians(m["angle"])
+                dist = (w/2)*m["dfrac"]
+                pt = QPointF(cx+dist*math.cos(rp), cy+dist*math.sin(rp))
+                pa = int(m["alpha"]*inner_opacity*a_mul)
+                painter.setBrush(QColor(150,225,70,int(pa*0.30)))
+                painter.drawEllipse(pt, m["size"]*2.2, m["size"]*2.2)
+                painter.setBrush(QColor(235,255,200,pa))
+                painter.drawEllipse(pt, m["size"], m["size"])
+
+        # Shell border
+        pen_a = int((80+120*hover_prog+70*panel_progress)*a_mul) if not is_active \
+                else int((80+70*panel_progress)*a_mul)
+        sp = QPen(QColor(150,225,70,pen_a)); sp.setWidthF(1.5+hover_prog)
+        painter.setBrush(Qt.NoBrush); painter.setPen(sp)
+        painter.drawRoundedRect(QRectF(cx-w/2,cy-h/2,w,h), rad, rad)
+
+        self._draw_hover(painter, cx, cy, w, h, r_base, alpha,
+                         inner_opacity, panel_progress, hover_prog, phase)
+
+        # Icon: a cycle arrow - an open ring with a head, not a folder or gear.
+        if inner_opacity > 0.05:
+            ia = int(255*inner_opacity*a_mul); is_ = w*0.26
+            ir = is_*0.42
+            painter.setPen(QPen(QColor(255,255,255,ia), 1.6,
+                                Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawArc(QRectF(cx-ir, cy-ir, ir*2, ir*2), int(35*16), int(285*16))
+
+            # Arrowhead closing the loop
+            tip_a = math.radians(-35)
+            tx = cx + ir*math.cos(tip_a); ty = cy + ir*math.sin(tip_a)
+            head = QPainterPath()
+            head.moveTo(tx - ir*0.34, ty - ir*0.10)
+            head.lineTo(tx + ir*0.16, ty - ir*0.02)
+            head.lineTo(tx - ir*0.10, ty + ir*0.36)
+            head.closeSubpath()
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255,255,255,ia))
+            painter.drawPath(head)
+
+        painter.restore()
+
+
+# ---------------------------------------------------------------------------
+# SCHEDULE PLANET - rose orb whose motif is a dial, not a sphere. An hour ring
+# with a sweeping hand and marks where the day is committed, so the planet
+# itself reads as "time with things in it".
+# ---------------------------------------------------------------------------
+class SchedulePlanet(BasePlanet):
+    def __init__(self):
+        super().__init__("SCHEDULE", QColor(255,70,150),
+                         "Your day, week and month - and what to do with the gaps")
+        self._sweep = 0.0
+        self._ring = 0.0
+        rng = random.Random(91)
+        # Fixed marks around the dial standing in for a committed day.
+        self._marks = [rng.uniform(0, 360) for _ in range(7)]
+        self._motes = [
+            {"angle":rng.uniform(0,360),"dfrac":rng.uniform(0.42,0.70),
+             "speed":rng.uniform(0.12,0.40)*rng.choice([-1,1]),
+             "size":rng.uniform(0.8,1.7),"alpha":rng.randint(40,150),
+             "adir":rng.choice([-1,1])*rng.uniform(1.4,3.0)}
+            for _ in range(9)]
+
+    def _tick(self):
+        super()._tick()
+        self._sweep = (self._sweep + 1.15) % 360      # the hand, clearly moving
+        self._ring = (self._ring - 0.22) % 360        # the ring, counter-drifting
+        for m in self._motes:
+            m["angle"] = (m["angle"] + m["speed"]) % 360
+            m["alpha"] += m["adir"]
+            if m["alpha"] > 165: m["alpha"], m["adir"] = 165, -abs(m["adir"])
+            elif m["alpha"] < 30: m["alpha"], m["adir"] = 30, abs(m["adir"])
+
+    def draw(self, painter, i, cx, cy, w, h, rad, alpha, is_hovered,
+             inner_opacity, panel_progress, is_active, phase, hover_prog=None):
+        self._maybe_tick(phase)
+        a_mul  = alpha/255.0
+        r_base = w*0.42
+        pulse  = math.sin(phase*0.045)
+        if hover_prog is None:
+            hover_prog = max(0.0, min(1.0, (w/90.0-1.0)/0.2))
+
+        painter.save()
+        painter.setRenderHint(painter.Antialiasing)
+
+        if inner_opacity > 0.02:
+            self._draw_idle(painter, cx, cy, w, r_base, alpha, inner_opacity, phase)
+
+        # Outer rose fog
+        r_fog = r_base*1.52 + pulse*2.0
+        fog = QRadialGradient(cx,cy,r_fog)
+        fog.setColorAt(0.0, QColor(255,70,150,int(52*inner_opacity*a_mul)))
+        fog.setColorAt(0.5, QColor(170,35,100,int(26*inner_opacity*a_mul)))
+        fog.setColorAt(1.0, QColor(0,0,0,0))
+        painter.setPen(Qt.NoPen); painter.setBrush(fog)
+        painter.drawEllipse(QPointF(cx,cy), r_fog, r_fog)
+
+        # Core
+        r_core = r_base*(0.86+pulse*0.04)
+        core = QRadialGradient(cx,cy,r_core)
+        core.setColorAt(0.00, QColor(255,255,255,int(250*inner_opacity*a_mul)))
+        core.setColorAt(0.13, QColor(255,225,240,int(238*inner_opacity*a_mul)))
+        core.setColorAt(0.34, QColor(255,110,175,int(212*inner_opacity*a_mul)))
+        core.setColorAt(0.60, QColor(170,35,100, int(160*inner_opacity*a_mul)))
+        core.setColorAt(0.84, QColor(70, 12, 42, int( 72*inner_opacity*a_mul)))
+        core.setColorAt(1.00, QColor(0,0,0,0))
+        painter.setBrush(core); painter.drawEllipse(QPointF(cx,cy),r_core,r_core)
+
+        # The dial: an hour ring, twelve ticks, committed marks, sweeping hand.
+        if inner_opacity > 0.02:
+            rr = w*0.68/2
+            rect = QRectF(cx-rr, cy-rr, rr*2, rr*2)
+
+            ring = QPen(QColor(255,70,150,int(70*inner_opacity*a_mul)))
+            ring.setWidthF(0.9)
+            painter.setPen(ring); painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(rect)
+
+            # Hour ticks
+            for t in range(12):
+                ang = math.radians(self._ring + t*30 - 90)
+                x0 = cx + (rr-3)*math.cos(ang); y0 = cy + (rr-3)*math.sin(ang)
+                x1 = cx + rr*math.cos(ang);     y1 = cy + rr*math.sin(ang)
+                pen = QPen(QColor(255,70,150,int((150 if t%3==0 else 70)
+                                                 *inner_opacity*a_mul)))
+                pen.setWidthF(1.2 if t%3==0 else 0.8)
+                painter.setPen(pen)
+                painter.drawLine(QPointF(x0,y0), QPointF(x1,y1))
+
+            # Committed marks sitting on the ring
+            painter.setPen(Qt.NoPen)
+            for angle in self._marks:
+                ang = math.radians(self._ring + angle - 90)
+                px = cx + rr*math.cos(ang); py = cy + rr*math.sin(ang)
+                painter.setBrush(QColor(255,70,150,int(60*inner_opacity*a_mul)))
+                painter.drawEllipse(QPointF(px,py), 4.2, 4.2)
+                painter.setBrush(QColor(255,205,230,int(200*inner_opacity*a_mul)))
+                painter.drawEllipse(QPointF(px,py), 1.8, 1.8)
+
+            # The hand — the one thing that says this dial is live
+            ang = math.radians(self._sweep - 90)
+            hx = cx + (rr-2)*math.cos(ang); hy = cy + (rr-2)*math.sin(ang)
+            glow = QPen(QColor(255,70,150,int(90*inner_opacity*a_mul)))
+            glow.setWidthF(3.0); glow.setCapStyle(Qt.RoundCap)
+            painter.setPen(glow)
+            painter.drawLine(QPointF(cx,cy), QPointF(hx,hy))
+            hand = QPen(QColor(255,225,240,int(225*inner_opacity*a_mul)))
+            hand.setWidthF(1.1); hand.setCapStyle(Qt.RoundCap)
+            painter.setPen(hand)
+            painter.drawLine(QPointF(cx,cy), QPointF(hx,hy))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255,225,240,int(225*inner_opacity*a_mul)))
+            painter.drawEllipse(QPointF(hx,hy), 2.2, 2.2)
+
+        # Ambient motes
+        if inner_opacity > 0.02:
+            painter.setPen(Qt.NoPen)
+            for m in self._motes:
+                rp = math.radians(m["angle"])
+                dist = (w/2)*m["dfrac"]
+                pt = QPointF(cx+dist*math.cos(rp), cy+dist*math.sin(rp))
+                pa = int(m["alpha"]*inner_opacity*a_mul)
+                painter.setBrush(QColor(255,70,150,int(pa*0.30)))
+                painter.drawEllipse(pt, m["size"]*2.2, m["size"]*2.2)
+                painter.setBrush(QColor(255,215,235,pa))
+                painter.drawEllipse(pt, m["size"], m["size"])
+
+        # Shell border
+        pen_a = int((80+120*hover_prog+70*panel_progress)*a_mul) if not is_active \
+                else int((80+70*panel_progress)*a_mul)
+        sp = QPen(QColor(255,70,150,pen_a)); sp.setWidthF(1.5+hover_prog)
+        painter.setBrush(Qt.NoBrush); painter.setPen(sp)
+        painter.drawRoundedRect(QRectF(cx-w/2,cy-h/2,w,h), rad, rad)
+
+        self._draw_hover(painter, cx, cy, w, h, r_base, alpha,
+                         inner_opacity, panel_progress, hover_prog, phase)
+
+        # Icon: two clock hands, no dial ring - the ring is already the planet.
+        if inner_opacity > 0.05:
+            ia = int(255*inner_opacity*a_mul); is_ = w*0.26
+            ir = is_*0.40
+            painter.setPen(QPen(QColor(255,255,255,ia), 1.7,
+                                Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(QPointF(cx,cy), QPointF(cx, cy-ir))
+            painter.drawLine(QPointF(cx,cy), QPointF(cx+ir*0.72, cy+ir*0.18))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255,255,255,ia))
+            painter.drawEllipse(QPointF(cx,cy), 1.8, 1.8)
+
+        painter.restore()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FORGE PLANET — The Visual Canvas & Maker Studio
+# ─────────────────────────────────────────────────────────────────────────────
+# Amber, not orange — SYSTEM two slots away owns the red end of the wheel.
+_FORGE_RINGS = [
+    dict(rf=0.52, arc=60, gap=30, spd= 0.60, r=255, g=185, b=0,   w=1.2, a=220),
+    dict(rf=0.68, arc=45, gap=45, spd=-0.42, r=255, g=150, b=10,  w=0.9, a=180),
+    dict(rf=0.82, arc=32, gap=58, spd= 0.28, r=255, g=215, b=110, w=0.8, a=140),
+]
+
+class ForgePlanet(BasePlanet):
+    def __init__(self):
+        super().__init__("FORGE", QColor(255, 185, 0), "Build · Watch · Open")
+        self._ring_angles = [0.0, 0.0, 0.0]
+        rng = random.Random(999)
+        self._motes = [
+            {"angle": rng.uniform(0, 360), "dfrac": rng.uniform(0.35, 0.82),
+             "speed": rng.uniform(0.18, 0.52) * rng.choice([-1, 1]),
+             "size": rng.uniform(0.9, 2.2), "alpha": rng.randint(50, 180),
+             "adir": rng.choice([-1, 1]) * rng.uniform(1.5, 3.5)}
+            for _ in range(8)
+        ]
+
+    def _tick(self):
+        super()._tick()
+        for i, ring in enumerate(_FORGE_RINGS):
+            self._ring_angles[i] = (self._ring_angles[i] + ring["spd"] * 0.7) % 360.0
+        for m in self._motes:
+            m["angle"] = (m["angle"] + m["speed"]) % 360.0
+            m["alpha"] += m["adir"]
+            if m["alpha"] > 200: m["alpha"], m["adir"] = 200, -abs(m["adir"])
+            elif m["alpha"] < 40: m["alpha"], m["adir"] = 40, abs(m["adir"])
+
+    def draw(self, painter, index, cx, cy, w, h, rad,
+             alpha, is_hovered, inner_opacity, panel_progress,
+             is_active, phase, hover_prog):
+        self._maybe_tick(phase)
+        a_mul = alpha / 255.0
+        r_base = w * 0.5
+        painter.save()
+
+        # Idle animations (sonar radar + scanner sweep + node crown)
+        self._draw_idle(painter, cx, cy, w, r_base, alpha, inner_opacity, phase)
+
+        # Volumetric plasma glow
+        aura = QRadialGradient(cx, cy, w * 0.65)
+        aura.setColorAt(0.00, QColor(255, 120, 20, int(150 * inner_opacity * a_mul)))
+        aura.setColorAt(0.40, QColor(255, 60,  0,  int(85  * inner_opacity * a_mul)))
+        aura.setColorAt(0.80, QColor(140, 20,  0,  int(25  * inner_opacity * a_mul)))
+        aura.setColorAt(1.00, QColor(0, 0, 0, 0))
+        painter.setBrush(aura); painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QPointF(cx, cy), w * 0.65, w * 0.65)
+
+        # Hot core sphere
+        core = QRadialGradient(cx, cy, r_base * 0.78)
+        core.setColorAt(0.00, QColor(255, 255, 220, int(255 * inner_opacity * a_mul)))
+        core.setColorAt(0.18, QColor(255, 210, 80,  int(240 * inner_opacity * a_mul)))
+        core.setColorAt(0.42, QColor(255, 120, 20,  int(200 * inner_opacity * a_mul)))
+        core.setColorAt(0.72, QColor(200, 50,  0,   int(140 * inner_opacity * a_mul)))
+        core.setColorAt(1.00, QColor(0, 0, 0, 0))
+        painter.setBrush(core); painter.drawEllipse(QPointF(cx, cy), r_base * 0.78, r_base * 0.78)
+
+        # Rotating cyber forge rings
+        if inner_opacity > 0.02:
+            for ri, ring in enumerate(_FORGE_RINGS):
+                rr = w * ring["rf"] / 2
+                rect = QRectF(cx - rr, cy - rr, rr * 2, rr * 2)
+                arc, gap = ring["arc"], ring["gap"]
+                rot = self._ring_angles[ri]
+                ba = int(ring["a"] * inner_opacity * a_mul)
+                ga = int(ba * 0.35)
+                angle = 0.0
+                while angle < 360.0:
+                    st = (rot + angle) % 360.0; dl = min(arc, 360.0 - angle)
+                    gpen = QPen(QColor(ring["r"], ring["g"], ring["b"], ga))
+                    gpen.setWidthF(ring["w"] * 3); gpen.setCapStyle(Qt.RoundCap)
+                    painter.setPen(gpen); painter.setBrush(Qt.NoBrush)
+                    painter.drawArc(rect, int(st * 16), int(dl * 16))
+                    cpen = QPen(QColor(ring["r"], ring["g"], ring["b"], ba))
+                    cpen.setWidthF(ring["w"]); cpen.setCapStyle(Qt.RoundCap)
+                    painter.setPen(cpen); painter.drawArc(rect, int(st * 16), int(dl * 16))
+                    angle += arc + gap
+
+        # Cyber energy spark motes
+        if inner_opacity > 0.02:
+            painter.setPen(Qt.NoPen)
+            for m in self._motes:
+                rp = math.radians(m["angle"])
+                dist = (w / 2) * m["dfrac"]
+                pt = QPointF(cx + dist * math.cos(rp), cy + dist * math.sin(rp))
+                pa = int(m["alpha"] * inner_opacity * a_mul)
+                painter.setBrush(QColor(255, 140, 20, int(pa * 0.35)))
+                painter.drawEllipse(pt, m["size"] * 2.2, m["size"] * 2.2)
+                painter.setBrush(QColor(255, 240, 180, pa))
+                painter.drawEllipse(pt, m["size"], m["size"])
+
+        # Shell border
+        pen_a = int((80 + 120 * hover_prog + 70 * panel_progress) * a_mul) if not is_active \
+                else int((80 + 70 * panel_progress) * a_mul)
+        sp = QPen(QColor(255, 120, 20, pen_a)); sp.setWidthF(1.5 + hover_prog)
+        painter.setBrush(Qt.NoBrush); painter.setPen(sp)
+        painter.drawRoundedRect(QRectF(cx - w/2, cy - h/2, w, h), rad, rad)
+
+        self._draw_hover(painter, cx, cy, w, h, r_base, alpha,
+                         inner_opacity, panel_progress, hover_prog, phase)
+
+        # Code brackets glyph: "< / >"
+        if inner_opacity > 0.05:
+            ia = int(255 * inner_opacity * a_mul)
+            sz = w * 0.22
+            painter.setPen(QPen(QColor(255, 255, 255, ia), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(QPointF(cx - sz * 0.5, cy), QPointF(cx - sz * 0.2, cy - sz * 0.35))
+            painter.drawLine(QPointF(cx - sz * 0.5, cy), QPointF(cx - sz * 0.2, cy + sz * 0.35))
+            painter.drawLine(QPointF(cx + sz * 0.5, cy), QPointF(cx + sz * 0.2, cy - sz * 0.35))
+            painter.drawLine(QPointF(cx + sz * 0.5, cy), QPointF(cx + sz * 0.2, cy + sz * 0.35))
+            painter.drawLine(QPointF(cx - sz * 0.08, cy + sz * 0.4), QPointF(cx + sz * 0.08, cy - sz * 0.4))
+
+        painter.restore()
+
+
 def get_planets():
     return [
-        GenericPlanet("Planet 0", QColor(255,140, 40), "App · Tools · Settings"),
-        GenericPlanet("Planet 1", QColor(255,140, 40), "App · Tools · Settings"),
+        ReservedPlanet(1),
+        SetupPlanet(),
         MemoryPlanet(),
         ChatPlanet(),
         FilesPlanet(),
         SystemPlanet(),
-        GenericPlanet("Planet 6", QColor(255,140, 40), "App · Tools · Settings"),
-        GenericPlanet("Planet 7", QColor(255,140, 40), "App · Tools · Settings"),
+        SchedulePlanet(),
+        ForgePlanet(),
     ]
 

@@ -4,11 +4,12 @@ import subprocess
 import ctypes
 import time
 import platform
-from PyQt5.QtWidgets import (
+from PyQt5.QtWidgets import (QSizePolicy, 
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout, QProgressBar
 )
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
+from . import workshop_style as W
 from .base import BasePanel, _content_alpha, _draw_header
 
 class SystemPanel(BasePanel):
@@ -23,21 +24,22 @@ class SystemPanel(BasePanel):
 class StatCard(QFrame):
     def __init__(self, title, icon, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("""
-            StatCard {
-                background-color: rgba(20, 10, 0, 140);
-                border: 1px solid rgba(255, 120, 0, 40);
-                border-radius: 12px;
-            }
-        """)
+        self.setStyleSheet(
+            "StatCard{background:rgba(20, 10, 0, 110);border:none;"
+            f"border-top:1px solid {W.SYSTEM.RULE_HI};"
+            "border-left:2px solid transparent;}"
+            f"StatCard:hover{{border-left:2px solid {W.SYSTEM.ACCENT};}}")
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(15, 15, 15, 15)
         
         header = QHBoxLayout()
         icon_lbl = QLabel(icon)
-        icon_lbl.setStyleSheet("color: #FF7800; font-size: 16px;")
+        icon_lbl.setStyleSheet(f"color:{W.SYSTEM.ACCENT};font-size:14px;"
+                               "background:transparent;border:none;")
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: #FF7800; font-weight: bold; font-size: 11px;")
+        title_lbl.setFont(W.label_font(9, bold=True, tracking=2.0))
+        title_lbl.setStyleSheet(f"color:{W.SYSTEM.ACCENT};"
+                                "background:transparent;border:none;")
         
         header.addWidget(icon_lbl)
         header.addWidget(title_lbl)
@@ -50,11 +52,13 @@ class TopCard(StatCard):
         super().__init__(title, icon, parent)
         
         self.value_lbl = QLabel("0%")
-        self.value_lbl.setStyleSheet("color: white; font-size: 24px; font-weight: bold;")
+        self.value_lbl.setFont(W.mono_font(17, bold=True))
+        self.value_lbl.setStyleSheet(f"color:{W.SYSTEM.BRIGHT};background:transparent;border:none;")
         self.layout.addWidget(self.value_lbl)
         
         self.desc_lbl = QLabel("")
-        self.desc_lbl.setStyleSheet("color: rgba(255, 255, 255, 140); font-size: 10px;")
+        self.desc_lbl.setFont(W.mono_font(8))
+        self.desc_lbl.setStyleSheet(f"color:{W.SYSTEM.DIM};background:transparent;border:none;")
         
         if is_progress:
             self.bar = QProgressBar()
@@ -63,11 +67,11 @@ class TopCard(StatCard):
             self.bar.setStyleSheet("""
                 QProgressBar {
                     background-color: rgba(255, 255, 255, 20);
-                    border-radius: 3px;
+                    border-radius:0px;
                 }
                 QProgressBar::chunk {
-                    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FF5000, stop:1 #FF8C00);
-                    border-radius: 3px;
+                    background-color: #FF6A10;
+                    border-radius:0px;
                 }
             """)
             self.layout.addWidget(self.bar)
@@ -100,7 +104,14 @@ class SystemMonitorThread(QThread):
     def run(self):
         while self.running:
             # Task Manager efficiency: If panel is not visible, don't poll! Just sleep and wait.
-            if not self.widget_ref.isVisible():
+            try:
+                visible = self.widget_ref.isVisible()
+            except RuntimeError:
+                # The widget's C++ side is gone — the app is shutting down and
+                # this thread outlived it. Stop rather than raise every loop.
+                self.running = False
+                return
+            if not visible:
                 time.sleep(0.5)
                 continue
 
@@ -167,7 +178,7 @@ class SystemMonitorThread(QThread):
 class SystemWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("background: transparent; color: white; font-family: 'Segoe UI';")
+        self.setStyleSheet("background:transparent;color:white;font-family:'Consolas';")
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 65, 16, 16)
@@ -183,9 +194,11 @@ class SystemWidget(QWidget):
         
         self.health_card = StatCard("SYSTEM HEALTH", "♥")
         health_val = QLabel("Healthy")
-        health_val.setStyleSheet("color: #4CAF50; font-size: 24px; font-weight: bold;")
+        health_val.setFont(W.mono_font(17, bold=True))
+        health_val.setStyleSheet("color:#7BD84A;background:transparent;border:none;")
         health_desc = QLabel("All systems operational")
-        health_desc.setStyleSheet("color: rgba(255, 255, 255, 140); font-size: 10px;")
+        health_desc.setFont(W.mono_font(8))
+        health_desc.setStyleSheet(f"color:{W.SYSTEM.DIM};background:transparent;border:none;")
         self.health_card.layout.addWidget(health_val)
         self.health_card.layout.addWidget(health_desc)
         self.health_card.layout.addStretch()
@@ -218,14 +231,16 @@ class SystemWidget(QWidget):
         )
         
         self.specs_lbl = QLabel(spec_text)
-        self.specs_lbl.setStyleSheet("color: rgba(255, 255, 255, 180); font-size: 11px; line-height: 1.5;")
+        self.specs_lbl.setStyleSheet(f"color:{W.SYSTEM.TEXT};font:11px 'Consolas';background:transparent;")
         self.specs_lbl.setWordWrap(True)
+        self.specs_lbl.setMinimumWidth(0)
+        self.specs_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.specs_card.layout.addWidget(self.specs_lbl)
         self.specs_card.layout.addStretch()
         
         self.perf_card = StatCard("PERFORMANCE", "📶")
         self.perf_lbl = QLabel()
-        self.perf_lbl.setStyleSheet("color: rgba(255, 255, 255, 180); font-size: 12px; line-height: 2;")
+        self.perf_lbl.setStyleSheet(f"color:{W.SYSTEM.TEXT};font:11px 'Consolas';background:transparent;")
         self.perf_card.layout.addWidget(self.perf_lbl)
         self.perf_card.layout.addStretch()
         
@@ -241,13 +256,13 @@ class SystemWidget(QWidget):
         
         self.net_card = StatCard("NETWORK", "🌐")
         self.net_lbl = QLabel()
-        self.net_lbl.setStyleSheet("color: rgba(255, 255, 255, 180); font-size: 12px;")
+        self.net_lbl.setStyleSheet(f"color:{W.SYSTEM.TEXT};font:11px 'Consolas';background:transparent;")
         self.net_card.layout.addWidget(self.net_lbl)
         self.net_card.layout.addStretch()
         
         self.io_card = StatCard("STORAGE I/O", "⇄")
         self.io_lbl = QLabel("Loading I/O data...")
-        self.io_lbl.setStyleSheet("color: rgba(255, 255, 255, 180); font-size: 12px; line-height: 1.8;")
+        self.io_lbl.setStyleSheet(f"color:{W.SYSTEM.TEXT};font:11px 'Consolas';background:transparent;")
         self.io_card.layout.addWidget(self.io_lbl)
         self.io_card.layout.addStretch()
         
@@ -264,12 +279,12 @@ class SystemWidget(QWidget):
         btn_layout = QHBoxLayout()
         
         # Define real, functional Windows utility buttons
-        self.btn_refresh = QPushButton("↻ Refresh")
-        self.btn_taskmgr = QPushButton("⚡ Task Manager")
-        self.btn_sys = QPushButton("⚙ Sys Settings")
-        self.btn_net = QPushButton("🌐 Net Settings")
-        self.btn_disk = QPushButton("🧹 Disk Cleanup")
-        self.btn_ram = QPushButton("🧠 Clean RAM")
+        self.btn_refresh = QPushButton("↻ REFRESH")
+        self.btn_taskmgr = QPushButton("⚡ TASKS")
+        self.btn_sys = QPushButton("⚙ SYSTEM")
+        self.btn_net = QPushButton("🌐 NETWORK")
+        self.btn_disk = QPushButton("🧹 DISK")
+        self.btn_ram = QPushButton("🧠 RAM")
 
         self.btn_refresh.clicked.connect(self._force_refresh)
         self.btn_taskmgr.clicked.connect(lambda: self._launch_and_minimize("taskmgr"))
@@ -282,21 +297,14 @@ class SystemWidget(QWidget):
         
         for btn in buttons:
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(20, 10, 0, 140);
-                    border: 1px solid rgba(255, 120, 0, 40);
-                    border-radius: 8px;
-                    color: rgba(255, 255, 255, 200);
-                    font-size: 11px;
-                    padding: 10px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 120, 0, 30);
-                    border: 1px solid rgba(255, 120, 0, 100);
-                    color: white;
-                }
-            """)
+            btn.setFont(W.label_font(9, tracking=1.4))
+            btn.setMinimumWidth(0)
+            btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            btn.setStyleSheet(
+                "QPushButton{background:transparent;"
+                f"border:1px solid {W.SYSTEM.RULE};color:{W.SYSTEM.DIM};padding:9px;}}"
+                "QPushButton:hover{background:rgba(255, 90, 20, 26);"
+                f"border:1px solid {W.SYSTEM.ACCENT_D};color:{W.SYSTEM.BRIGHT};}}")
             btn_layout.addWidget(btn)
         
         bot_layout.addLayout(btn_layout)
@@ -382,3 +390,7 @@ class SystemWidget(QWidget):
             
         except Exception as e:
             pass
+
+    def paintEvent(self, event):
+        """The workshop frame: flat ground, scanlines, hairline edge, brackets."""
+        W.SYSTEM.frame(self)

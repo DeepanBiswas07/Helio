@@ -6,11 +6,23 @@ from datetime import datetime
 from tools.tool_registry import tool
 
 
+def _get_phase(now):
+    hour = now.hour
+    if 4 <= hour < 12:
+        return "morning"
+    elif 12 <= hour < 17:
+        return "afternoon"
+    elif 17 <= hour < 21:
+        return "evening"
+    else:
+        return "night"
+
+
 @tool(
     name="get_datetime",
     description=(
-        "Get the current local date, time, or day of the week. "
-        "Specify 'query' parameter with 'time', 'date', or 'day' depending on what is asked."
+        "Get the current local date, time, day of the week, or phase of the day (morning/evening/night). "
+        "Specify 'query' parameter with 'time', 'date', 'day', or 'phase'."
     ),
     parameters={"query": "string"},
     required=[]
@@ -18,39 +30,39 @@ from tools.tool_registry import tool
 def handle_get_datetime(action_data):
     now = datetime.now()
     q = str(action_data.get("query", "")).lower().strip()
+    phase = _get_phase(now)
+    time_str = now.strftime("%I:%M %p").lstrip("0")
     
-    # Check what specifically the user is asking for
-    is_time = False
-    is_date = False
-    is_day = False
-    
-    if "time" in q or "clock" in q or "hour" in q:
-        is_time = True
-    elif "date" in q or "month" in q or "year" in q or "today" in q:
-        is_date = True
-    elif "day" in q or "week" in q or "weekday" in q:
-        is_day = True
-    else:
-        # If the query is completely empty or general, return all details
-        is_time = True
-        is_date = True
-        is_day = True
+    # 0. Greetings ("good morning", "good evening", "hello", etc.)
+    if "greeting" in q:
+        greeting_word = "Good morning" if phase == "morning" else (
+            "Good afternoon" if phase == "afternoon" else (
+                "Good evening" if phase == "evening" else "Hello"
+            )
+        )
+        if "night" in phase:
+            return f"Good evening! It's currently {time_str} on {now.strftime('%A')} night. How can I help you?"
+        return f"{greeting_word}! It's {time_str} on {now.strftime('%A')}. How can I assist you?"
 
-    # 1. Time only (Premium hearable voice style, e.g. "It's 3:25 PM")
-    if is_time and not is_date and not is_day:
-        return f"It's {now.strftime('%I:%M %p')}"
+    # 1. Phase query ("is it morning or night", "what phase of day")
+    if "phase" in q or "morning" in q or "night" in q or "evening" in q or "afternoon" in q:
+        return f"It's currently {time_str}, so it is {phase} on {now.strftime('%A')}."
+
+    # 2. Time only (e.g. "It's 3:25 PM")
+    if "time" in q or "clock" in q or "hour" in q:
+        return f"It's {time_str}"
         
-    # 2. Date only (e.g. "May 21, 2026")
-    if is_date and not is_time and not is_day:
+    # 3. Date only (e.g. "September 07, 2026")
+    if "date" in q or "month" in q or "year" in q or "today" in q:
         return now.strftime("%B %d, %Y")
         
-    # 3. Day only (e.g. "Thursday")
-    if is_day and not is_time and not is_date:
+    # 4. Day only (e.g. "Monday")
+    if "day" in q or "week" in q or "weekday" in q:
         return now.strftime("%A")
         
-    # 4. Default / All Details
+    # 5. Default / All Details
     return (
-        f"{now.strftime('%A, %B %d %Y')} — "
-        f"{now.strftime('%I:%M %p')}"
+        f"{now.strftime('%A, %B %d, %Y')} — "
+        f"{time_str} ({phase})"
     )
 
