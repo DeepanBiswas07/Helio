@@ -59,6 +59,43 @@ Hand tracking through your webcam: a peace sign opens a command window, an open 
 
 ---
 
+## 🖐️ The Air Mouse
+
+<img src="docs/media/airmouse.webp" alt="Both hands tracked live and drawn as glowing holograms over Helio's solar system, the right index finger acting as the cursor" width="100%">
+
+<sub>Real capture: both hands tracked through the webcam and drawn live over Helio's solar system.</sub>
+
+**Clap, and your hands become the controller.** Helio draws them as glowing holograms on top of everything — your desktop, its own solar system, even the full-screen Workshop — and your index fingertip becomes the cursor. No gloves, no sensors, just a webcam.
+
+<table>
+<tr>
+<td width="62%" valign="top">
+
+| Do this | And Helio… |
+|---|---|
+| 👏 **Clap** | turns the air mouse on or off |
+| ☝️ **Point** | moves the cursor with your index fingertip |
+| 🤏 **Quick pinch** | clicks — exactly where the pinch started |
+| 🤏 **Hold the pinch** | grabs and drags: windows, sliders, anything |
+| 🙌 **Both hands in the Workshop** | gives each hand its own pointer — carry two things at once |
+
+**Why it feels solid:**
+- **Rock-steady, never laggy** — an adaptive One Euro filter holds a resting hand still and lets a fast move through instantly.
+- **Taps land on target** — the pointer freezes while your fingers close, so the click lands where you aimed.
+- **No accidental commands** — other gestures pause while the air mouse is on, so pointing is never mistaken for a swipe.
+- **Always on top, never in the way** — the hologram sits above every window, and clicks pass straight through to the app underneath.
+
+</td>
+<td width="38%" valign="top">
+
+<img src="docs/media/airmouse_hand.webp" alt="Close-up of the holographic hand with the POINTER reticle on the index fingertip" width="100%">
+
+</td>
+</tr>
+</table>
+
+---
+
 ## ⚒️ The Forge & the Workshop
 
 <img src="docs/media/build.webp" alt="Helio building a multi-file website live in the workshop, code on the left and the page on the right" width="100%">
